@@ -1,0 +1,17 @@
+
+Input:
+# Task
+You carefully read the contents of the “Paper Outline” and select one GitHub link from the “GitHub URLs List” that you think is most relevant to the contents.
+# Constraints
+- Output the index number corresponding to the selected GitHub URL.
+- Be sure to select only one GitHub URL.
+- If there is no related GitHub link, output None.
+# Paper Outline
+The methodology transforms neighborhood attention, initially viewed as General Matrix-Vector Multiplication (GEMV) problems, into General Matrix-Matrix Multiplication (GEMM) problems with scatter/gather fusion. For GEMM-based NA, the authors modified CUTLASS GEMM operations to include space-aware tiling and predication logic tailored for multi-dimensional layouts, though scatter/gather operations became a bottleneck for lower precision. To overcome this, fused neighborhood attention (Fused NA) was developed by extending fused attention kernels (like Flash Attention, specifically built upon xFormers FMHA). This fused approach avoids storing attention weights in global memory, circumventing the scatter/gather bottleneck. The authors define three primary operators (Pointwise-Neighborhood, Neighborhood-Neighborhood, and Inverse-Neighborhood) and implement trivial support for dilation and causal masking. An analysis of arithmetic intensity shows that fused NA can become compute-bound, with efficiency depending on the attention window size.
+
+# GitHub URLs List
+['https://github.com/SHI-Labs/NATTEN', 'https://github.com/NVIDIA/apex', 'https://github.com/facebookresearch/xformers']
+Output:
+{
+    "index": 0
+}
