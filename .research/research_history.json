@@ -697,6 +697,11 @@
         "smoke_test_yaml": "experiment_name: smoke_test\nmodel: hashpipe\ndataset: Reddit\nhidden: 64\nnum_layers: 2\nheads: 4\nT: 8\ncache_size: 4\nsketch: 16\ntau: [4, 8, 12]\nlr: 0.001\nepochs: 1\nverbose: true\n",
         "full_experiment_yaml": "experiment_name: full_experiment\nmodel: hashpipe\ndataset: Reddit\nhidden: 256\nnum_layers: 6\nheads: 8\nT: 32\ncache_size: 16\nsketch: 32\ntau: [4, 8, 12]\nlr: 0.0003\nepochs: 30\nverbose: false\n"
       }
+    },
+    "experimental_results": {
+      "result": "=== [PHASE 2/2] Full experiment start Mon Sep 22 09:55:16 AM UTC 2025 ===",
+      "error": "/home/toma/pt-80-1-a-13/_work/experiment_matsuzawa_2509222/experiment_matsuzawa_2509222/src/train.py:212: FutureWarning: `torch.cuda.amp.GradScaler(args...)` is deprecated. Please use `torch.amp.GradScaler('cuda', args...)` instead.\n  scaler = GradScaler()\n/home/toma/pt-80-1-a-13/_work/experiment_matsuzawa_2509222/experiment_matsuzawa_2509222/src/train.py:220: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.\n  with autocast():",
+      "image_file_name_list": []
     }
   },
   "idea_info_history": [
@@ -749,5 +754,6 @@
       }
     }
   ],
+  "executed_flag": true,
   "experiment_iteration": 1
 }
