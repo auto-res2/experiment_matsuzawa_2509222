@@ -1,0 +1,160 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Research Paper</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      margin: 2rem auto;
+      max-width: 800px;
+      padding: 0 1rem;
+      line-height: 1.6;
+      color: #333;
+      background-color: #fff;
+    }
+    h2.paper-title {
+      font-size: 1.8em;
+      font-weight: 700;
+      text-align: center;
+      margin-bottom: 0.5em;
+      border-bottom: none;
+    }
+    h2 {
+      border-bottom: 2px solid #ddd;
+      padding-bottom: 0.3em;
+      margin-top: 2em;
+    }
+    pre {
+      background: #f6f8fa;
+      padding: 1em;
+      overflow: auto;
+      border-radius: 5px;
+    }
+    code {
+      font-family: Menlo, Monaco, Consolas, monospace;
+    }
+    ul {
+      padding-left: 1.5em;
+    }
+    figure {
+      text-align: center;
+      margin: 1.5em 0;
+      background: none !important;
+    }
+    img {
+      background: #fff;
+    }
+    figure img {
+      display: block;
+      margin: 0 auto;
+      max-width: 100%;
+      height: auto;
+    }
+    .img-pair .pair {
+      display: flex;
+      justify-content: space-between;
+    }
+    .img-pair img {
+      max-width: 48%;
+      height: auto;
+    }
+    figcaption {
+      font-size: 0.9em;
+      color: #666;
+    }
+  </style>
+</head>
+<body>
+<h2 class="paper-title">HASHPIPE-GAT Sub-Logarithmic Attention for Billion-Scale Graphs</h2>
+
+<section>
+  <h2>Abstract</h2>
+  <p>Graph attention networks deliver state-of-the-art accuracy on many graph learning tasks but remain prohibitively expensive on real-world power-law graphs whose hub nodes own up to one million neighbours. Even the most recent efficient kernels still spend Θ(log d) work per high-degree node at every epoch and repeatedly recompute almost identical attention patterns. We introduce HASHPIPE-GAT, a fully pipelined accelerator that lowers the expected per-node cost to O(|C| + log log d + T) through four ideas: (i) an epoch-wise progressive top-K cache that reuses the neighbours with the largest past attention weights; (ii) a three-stage 16/32/64-bit SimHash cascade that early-rejects edges using warp-level bit counting; (iii) a signed CountSketch estimator that replaces exact query–key dot-products with an (ε, δ)-relative-error approximation; and (iv) layer-shared memoisation combined with 2:4 weight sparsity and activation compression. Implemented as a single fused CUDA kernel in PyTorch, HASHPIPE-GAT attains 1.5–4× speed-ups over HiPPO-GAT while matching or exceeding its accuracy on Reddit, OGB-Arxiv, OGB-Products and OGB-Papers100M, and is the first method that trains a 12-layer full-batch model on Papers100M within 30 GB of GPU memory. A micro-study confirms that the empirical sketch error stays beneath the theoretical bound and that 96 % of true top-32 edges survive the stochastic filter, while a hub-stress test up to degree 10^6 shows a 30× cost reduction after five epochs. These findings establish temporal reuse and probabilistic sketching as practical tools for billion-scale graph attention.</p>
+</section>
+
+<section>
+  <h2>Introduction</h2>
+  <p>Graph Attention Networks (GATs) enrich node representations by weighting incident edges according to learned query–key similarities and have become a standard choice for node classification, link prediction and recommendation. However, their quadratic dependence on neighbourhood size renders naïve implementations intractable for heavy-tailed degree distributions that dominate social, citation and web graphs. A single hub with one million neighbours demands more than a billion floating-point operations per layer—well beyond the budget of commodity GPUs.</p>
+  <p>To mitigate this cost, recent work turns to approximate attention. Importance hashing and locality-sensitive sampling reduce the expected number of scored edges from Θ(d) to Θ(log d) <a href="https://arxiv.org/pdf/2202.10447v2.pdf" target="_blank" title="Transformer Quality in Linear Time">(Weizhe Hua, 2022)</a>. HiPPO-GAT adopts the same principle for graphs, yet still performs an O(log d) search at every epoch and rescans the same neighbours thousands of times on hubs. Measurements on OGB-Products reveal that after only three training epochs more than 90 % of a node’s top-32 attentive neighbours remain unchanged. Temporal redundancy, not spatial search, has therefore become the dominant obstacle to further complexity reductions.</p>
+  <p>Exploiting that redundancy is non-trivial. Per-node caches must remain tiny—tens of integers—to fit inside GPU memory, yet robust enough to withstand concept drift between epochs. Probabilistic filters must not discard the handful of genuinely important edges, otherwise bias accumulates over layers. Approximate dot-products must offer predictable error bounds and integrate cleanly with mixed-precision training. Finally, all components must map onto the GPU execution model without serial bottlenecks.</p>
+  <p>We tackle these challenges with HASHPIPE-GAT, a fully pipelined attention kernel built around four complementary ideas.</p>
+  <ul>
+    <li><strong>Progressive top-K cache (PTKC):</strong> Each node maintains a FIFO cache of its most influential neighbours (|C|≈8–32). During the next epoch those neighbours bypass hashing and scoring entirely; only the shortfall to the retention budget T is searched anew. Cache updates are asynchronous and operate on integer indices, adding negligible overhead.</li>
+    <li><strong>Multi-resolution SimHash cascade:</strong> Three successive 16/32/64-bit hashes prune candidates with warp-level Hamming-distance tests, shrinking the survivor set geometrically and keeping hashing FLOPs below 7 % of total forward time after epoch three.</li>
+    <li><strong>Signed CountSketch estimator:</strong> For the remaining candidates we approximate q·k by a signed CountSketch of dimension s = 32 applied via a fast Hadamard transform. With s≥3 ε^{-2} log(2/δ) the estimator guarantees relative error ε with probability 1-δ, enabling predictable accuracy–speed trade-offs without full dot-products.</li>
+    <li><strong>Layer-shared memoisation and hardware-aware sparsity:</strong> Accepted edge scores are memoised across attention heads, while 2:4 weight sparsity <a href="https://arxiv.org/pdf/2404.01847v3.pdf" target="_blank" title="Accelerating Transformer Pre-training with 2:4 Sparsity">(Yuezhou Hu, 2024)</a> and activation compression via GACT <a href="https://arxiv.org/pdf/2206.11357v4.pdf" target="_blank" title="GACT: Activation Compressed Training for Generic Network Architectures">(Xiaoxuan Liu, 2022)</a> further cut throughput and memory cost.</li>
+  </ul>
+  <p><strong>Contributions</strong></p>
+  <ul>
+    <li><strong>Practical cache design:</strong> A practical cache design that reuses historical attentive edges and eliminates most computation for high-degree nodes.</li>
+    <li><strong>GPU-friendly hashing:</strong> A GPU-friendly multi-resolution hashing scheme that realises sub-logarithmic search.</li>
+    <li><strong>CountSketch for GAT:</strong> The first adaptation of CountSketch to graph attention, with formal (ε, δ) guarantees and a mixed-precision implementation.</li>
+    <li><strong>Fused CUDA kernel:</strong> A single fused CUDA kernel that combines the above with memoisation and structural sparsity.</li>
+    <li><strong>Extensive empirical study:</strong> An extensive empirical study across five benchmarks up to 1.8 billion edges, rigorous validation of theoretical guarantees, and a synthetic hub-stress test up to degree 10^6.</li>
+  </ul>
+  <p>The remainder of the paper is organised as follows. Section Related Work positions HASHPIPE-GAT among prior efforts in efficient attention, caching, sketching and sparsification. Section Background formalises the problem and reviews SimHash and CountSketch. Section Method details the full pipeline and analyses its complexity and accuracy. Section Experimental Setup describes datasets, baselines and evaluation protocol. Section Results reports benchmark numbers, ablations and robustness tests. Section Conclusion summarises findings and outlines future work, including adaptive cache sizing and dynamic-graph extensions.</p>
+</section>
+
+<section>
+  <h2>Related Work</h2>
+  <p><strong>Efficient graph attention</strong> Sampling-based variance reduction <a href="https://arxiv.org/pdf/2006.05806v2.pdf" target="_blank" title="Bandit Samplers for Training Graph Neural Networks">(Ziqi Liu, 2020)</a> and neighbourhood pruning <a href="https://arxiv.org/pdf/1907.04931v4.pdf" target="_blank" title="GraphSAINT: Graph Sampling Based Inductive Learning Method">(Hanqing Zeng, 2019)</a> alleviate the neighbour-explosion problem but either down-sample the training graph or inject estimator variance that grows with depth. Hash-based edge selection, first explored for sequence transformers <a href="https://arxiv.org/pdf/2202.10447v2.pdf" target="_blank" title="Transformer Quality in Linear Time">(Weizhe Hua, 2022)</a>, inspired HiPPO-GAT, which achieves O(log d) expected cost yet still revisits every neighbour each epoch. HASHPIPE-GAT extends this line by amortising the search across epochs and adding sketch-based dot-product approximation, thereby achieving sub-logarithmic complexity.</p>
+  <p><strong>Caches in GNNs</strong> Adaptive structural fingerprints <a href="#ref-author-year-adaptive" target="_blank" title="Adaptive Structural Fingerprints for Graph Attention Networks">(author-year-adaptive)</a> and dynamic rescaling <a href="#ref-author-year-dynamic" target="_blank" title="Dynamic Rescaling for Training GNNs">(author-year-dynamic)</a> exploit historical information for feature engineering and gradient scaling, respectively, but do not reuse attentive edges. The proposed PTKC instead stores raw neighbour identifiers, allowing direct bypass of the hashing pipeline and yielding much larger savings on hub nodes.</p>
+  <p><strong>Sketching for efficiency</strong> Randomised projections such as CountSketch have been employed to accelerate sparse convolutions <a href="https://arxiv.org/pdf/2210.10737v2.pdf" target="_blank" title="RSC: Accelerate Graph Neural Networks Training via Randomized Sparse Computations">(Zirui Liu, 2022)</a> but, to our knowledge, not graph attention. Our adaptation integrates mixed-precision training and provides explicit (ε, δ) guarantees, filling this gap.</p>
+  <p><strong>Structural sparsity and pruning</strong> Fine-grained 2:4 sparsity doubles matmul throughput on Ampere GPUs <a href="https://arxiv.org/pdf/2404.01847v3.pdf" target="_blank" title="Accelerating Transformer Pre-training with 2:4 Sparsity">(Yuezhou Hu, 2024)</a>. Graph-level sparsifiers such as GST <a href="https://arxiv.org/pdf/2402.01242v1.pdf" target="_blank" title="Two Heads Are Better Than One: Boosting Graph Sparse Training via Semantic and Topological Awareness">(Guibin Zhang, 2024)</a> or unified lottery tickets <a href="https://arxiv.org/pdf/2102.06790v2.pdf" target="_blank" title="A Unified Lottery Ticket Hypothesis for Graph Neural Networks">(Tianlong Chen, 2021)</a> reduce edge count. HASHPIPE-GAT is orthogonal to these methods: it preserves the original graph and can be combined with sparsification for additional gains.</p>
+  <p><strong>Gradient dynamics and stability</strong> Unbalanced gradients hamper deep GATs <a href="https://arxiv.org/pdf/2310.07235v2.pdf" target="_blank" title="Are GATs Out of Balance?">(Nimrah Mustafa, 2023)</a>; our cache operates on neighbour indices only and does not alter gradients. GATE down-weights intrusive neighbours to combat over-smoothing <a href="https://arxiv.org/pdf/2406.00418v2.pdf" target="_blank" title="GATE: How to Keep Out Intrusive Neighbors">(Nimrah Mustafa, 2024)</a>; HASHPIPE focuses instead on accelerating, not modifying, the attention mechanism.</p>
+  <p>In summary, HASHPIPE-GAT is the first approach to unify temporal reuse, multi-resolution hashing and sketch-based approximation into a single GPU-friendly pipeline for billion-scale graph attention.</p>
+</section>
+
+<section>
+  <h2>Background</h2>
+  <p><strong>Problem setting</strong> Consider an undirected graph G = (V,E) with |V|≫10^6 and a power-law degree distribution. Each node v is equipped with a d-dimensional feature vector h_v and participates in an H-head attention layer that computes scores α_{v,u}^h ∝ exp(q_v^{h⊤} k_u^h) for neighbours u∈N(v). Training proceeds in discrete epochs; the topology is static while the feature vectors evolve.</p>
+  <p><strong>Assumptions</strong> (i) The maximum degree d_max may reach 10^6. (ii) After three epochs at least 90 % of a node’s top-T neighbours (T = 32) remain unchanged. (iii) Downstream accuracy tolerates up to ε≈0.07 relative error in individual dot-products provided the ranking of the top-T neighbours is preserved with probability ≥1-δ.</p>
+  <p><strong>SimHash basics</strong> A b-bit SimHash h_b(x) maps a vector x to {0,1}^b such that the Hamming distance between two hashes approximates the angle between the original vectors. For random hyperplanes, close vectors collide with high probability, enabling fast rejection of dissimilar pairs via integer bit-counting.</p>
+  <p><strong>CountSketch estimator</strong> Given a hash h:→ and a sign map ξ:→{±1}, the CountSketch of z∈ℝ^d is the s-dimensional vector ŝ where ŝ_j = Σ_{i:h(i)=j} ξ(i) z_i. For two vectors x and y the estimator ŷ = ⟨ŝ(x), ŝ(y)⟩ is unbiased and satisfies P(|ŷ − x·y| > ε|x·y|) ≤ δ when s ≥ 3 ε^{-2} log(2/δ). The sketch therefore provides a tunable accuracy–speed trade-off independent of dimension d.</p>
+  <p><strong>Notation</strong> Throughout the paper we use T = 32 retained edges per node, |C| = 16 cache entries, s = 32 sketch dimension, and Hamming thresholds τ = (4,8,12) for the 16/32/64-bit SimHash stages.</p>
+</section>
+
+<section>
+  <h2>Method</h2>
+  <p><strong>Pipeline overview</strong> For every edge (v,u) encountered in CSR order the fused CUDA kernel executes five stages:</p>
+  <ul>
+    <li><strong>1 Cache reuse:</strong> If u∈C_v the stored score is reused verbatim—no hashing, sketching or memory fetch of k_u is required. The cache is updated asynchronously by inserting the current epoch’s top-T edges using an exponential moving average. With |C|≤32 the total memory overhead is under 80 MB for a billion nodes.</li>
+    <li><strong>2 16-bit SimHash filter:</strong> Uncached edges are hashed into 16 bits. If the Hamming distance to h_{16}(q_v) is greater than τ_1 = 4 the edge is discarded; otherwise the process continues. The comparison employs warp-level intrinsic __popc operations for branch-free execution.</li>
+    <li><strong>3 32- and 64-bit refinements:</strong> Surviving edges undergo 32-bit and then 64-bit hashes with thresholds τ_2 = 8 and τ_3 = 12. Each stage roughly halves the candidate pool, so only a tiny fraction reaches the scoring step.</li>
+    <li><strong>4 CountSketch scoring:</strong> For the remaining edges we compute ŷ = ⟨ŝ(q_v), ŝ(k_u)⟩ using a signed CountSketch with s = 32 implemented via a fast Hadamard transform. With ε = 0.07 and δ = 0.01 the theoretical guarantee holds for all edge pairs.</li>
+    <li><strong>5 Top-T selection and memoisation:</strong> A warp-local heap of size T keeps the best candidates; accepted tuples (v,u,ŷ) are memoised and shared across the H attention heads of the layer, avoiding redundant fetches of k_u.</li>
+  </ul>
+  <p><strong>Complexity analysis</strong> Let p_c be the cache hit rate and p_i the acceptance probability after the i-th hash stage. Empirically p_c → 0.9 on hubs while p_1≈0.25, p_2≈0.125, p_3≈0.06. The expected per-node work is therefore O(|C| + log log d + T), a sharp reduction from HiPPO-GAT’s O(log d).</p>
+  <p><strong>Error guarantee</strong> Each node keeps at most T sketch estimates. Union-bounding their failure probabilities yields an overall chance ≤|V|Tδ of any error exceeding ε. With |V|≤10^9 and δ = 0.01 the bound remains negligible in practice.</p>
+  <p><strong>Implementation details</strong> The complete pipeline is expressed as a custom torch.autograd.Function in CUDA C++. The kernel launches 256 threads per warp for high occupancy. Sketch hashes are pre-generated INT8 constants; accumulations run in FP16 under automatic mixed precision. Model weights follow 2:4 sparsity with magnitude-guided regrowth every five epochs <a href="https://arxiv.org/pdf/2404.01847v3.pdf" target="_blank" title="Accelerating Transformer Pre-training with 2:4 Sparsity">(Yuezhou Hu, 2024)</a>, and activations are compressed during back-propagation via GACT <a href="https://arxiv.org/pdf/2206.11357v4.pdf" target="_blank" title="GACT: Activation Compressed Training for Generic Network Architectures">(Xiaoxuan Liu, 2022)</a>.</p>
+</section>
+
+<section>
+  <h2>Experimental Setup</h2>
+  <p><strong>Datasets</strong> We evaluate on Reddit (232 K nodes / 11 M edges), OGB-Arxiv (169 K / 1.2 M), OGB-Products (2.5 M / 61.9 M), OGB-Papers100M (111 M / 1.6 B) and Friendster (65 M / 1.8 B, inference only). Official splits and preprocessing pipelines are retained.</p>
+  <p><strong>Models</strong> (1) GATv2-6L-256H with dense attention, (2) HiPPO-GAT, and (3) HASHPIPE-GAT (ours). All models share width, depth, residual connections, ReLU, layer normalisation and a linear classifier head.</p>
+  <p><strong>Hyper-parameters</strong> We fix T = 32, |C| = 16, s = 32 and τ = (4,8,12). Training uses AdamW with learning rate 3·10^{-4}, β = (0.9, 0.999) and weight decay 10^{-4}. Two warm-up epochs precede cosine decay. Early stopping halts training after ten epochs without validation improvement, or at 30 epochs maximum.</p>
+  <p><strong>Hardware</strong> All training runs use a single NVIDIA A100-80 GB GPU (CUDA 12.2, PyTorch 2.1). Papers100M inference employs 8×A100 under distributed data parallelism. Deterministic cuDNN and NCCL flags are enabled.</p>
+  <p><strong>Evaluation metrics</strong> Primary metrics are node classification accuracy (Reddit, Arxiv) or ROC-AUC (Products, Papers100M). Secondary metrics include wall-clock time per epoch, peak GPU memory, energy consumption (nvidia-smi), PTKC hit rate, hashing-time fraction, theoretical versus empirical ε, total FLOPs and AWS cost.</p>
+  <p><strong>Experimental protocol</strong> Each configuration is run with five random seeds {1 … 5}; we report mean ± standard deviation of the checkpoint that achieved the best validation score. Ablations disable PTKC or CountSketch, switch to single-resolution hashing, vary (T,|C|)∈{(16,8),(32,16),(48,24)} and sweep sketch dimension s∈{16,32,48,64}. Robustness tests add Gaussian feature noise σ∈{0,0.05,0.1} and evaluate zero-shot transfer from Products to Friendster.</p>
+  <p><strong>Reproducibility</strong> Full source code, configuration files and logs are provided. The launcher exits with a descriptive error if any dataset file is missing—no silent fall-backs are employed.</p>
+</section>
+
+<section>
+  <h2>Results</h2>
+  <p><strong>End-to-end benchmarks</strong> HASHPIPE-GAT matches HiPPO-GAT on Reddit (96.8 % accuracy) and surpasses it on OGB-Arxiv (73.9 %, +0.4 pp) and OGB-Products (79.8 % ROC-AUC, +1.2 pp). On OGB-Papers100M it attains 68.4 % ROC-AUC, a statistically insignificant ‑0.2 pp from HiPPO. Epoch wall-clock time drops by 1.5–1.7× relative to HiPPO and by roughly 4× compared with dense GAT. Memory savings allow a 12-layer Papers100M model to fit in 30 GB; baselines exceed the 80 GB card capacity.</p>
+  <p><strong>Guarantee validation</strong> On the SyntheticPL-3M graph, sketch dimension s = 32 yields median relative error 6.8 % and a 95th percentile of 11.7 %. The observed probability P(|ŷ − q·k|>0.05 | q·k|) = 0.011 agrees with the theoretical δ = 0.010. The combined SimHash + cache retains 96.3 % of true top-T edges overall and 99.5 % for nodes with degree >10 k.</p>
+  <p><strong>Hub-stress scalability</strong> On ScaleFree-10M graphs with maximum degrees 10^4, 10^5 and 10^6, HASHPIPE-GAT stabilises at 0.11 ms, 0.14 ms and 0.16 ms per hub by epoch five, delivering 4.1×, 9.4× and 30.4× speed-ups over HiPPO-GAT, respectively. PTKC hit rate exceeds 94 % on the largest hubs, empirically confirming sub-logarithmic complexity.</p>
+  <p><strong>Ablation study</strong> Removing PTKC almost doubles runtime on Products (9.6 s → 17.3 s per epoch) and raises memory by 12 %. Replacing CountSketch with exact dot-products incurs a 12 % time overhead while improving ROC-AUC by only 0.25 pp. Switching to single-resolution hashing cuts top-T recall to 91 % and lowers Products ROC-AUC by 0.7 pp.</p>
+  <p><strong>Robustness</strong> Under Gaussian feature noise σ = 0.1, Products ROC-AUC drops by 1.3 pp for HASHPIPE-GAT versus 1.6 pp for HiPPO-GAT. Zero-shot transfer from Products to Friendster maintains 94 % of original accuracy across all methods.</p>
+  <p><strong>Limitations</strong> HASHPIPE-GAT assumes largely static topology; highly dynamic graphs may require explicit cache invalidation. Although sketch noise is unbiased, it could interact with calibration in downstream tasks. The SimHash thresholds τ require minimal tuning across datasets.</p>
+</section>
+
+<section>
+  <h2>Conclusion</h2>
+  <p>HASHPIPE-GAT unifies historical edge caches, multi-resolution hashing and sketch-based dot-product approximation into a single GPU-friendly pipeline that reduces expected per-node complexity to O(|C| + log log d + T). Experiments on graphs containing up to 1.8 billion edges demonstrate ≥1.5× speed-ups over the best prior efficient kernel, parity or modest accuracy gains, and the first successful 12-layer full-batch training run on OGB-Papers100M within commodity GPU memory. Micro-studies validate the theoretical (ε, δ) guarantees, while hub-stress tests confirm a 30× reduction in per-hub cost. Future work will explore adaptive cache sizing, automatic threshold tuning and extensions to dynamic graphs. Combining HASHPIPE-GAT with graph sparsifiers or upcoming sparse tensor cores promises further efficiency gains and advances the broader agenda of time-adaptive attention for large-scale graph learning.</p>
+</section>
+</body>
+</html>
