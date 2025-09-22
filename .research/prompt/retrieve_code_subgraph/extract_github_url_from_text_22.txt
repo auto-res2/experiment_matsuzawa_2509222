@@ -1,0 +1,17 @@
+
+Input:
+# Task
+You carefully read the contents of the “Paper Outline” and select one GitHub link from the “GitHub URLs List” that you think is most relevant to the contents.
+# Constraints
+- Output the index number corresponding to the selected GitHub URL.
+- Be sure to select only one GitHub URL.
+- If there is no related GitHub link, output None.
+# Paper Outline
+The ATTA model adapts a pre-trained model to streaming unlabeled test data by actively selecting and having informative instances labeled by an oracle within a budget. Labeled samples are combined with pseudo-labeled low-entropy (source-like) data, and the model parameters are updated using a weighted combination of cross-entropy loss for labeled data and an unsupervised loss for unlabeled data. Theoretically, the method establishes learning and generalization bounds using HΔH-distance and VC-dimension, demonstrating how active learning reduces error. To mitigate catastrophic forgetting, low-entropy samples are pseudo-labeled by the frozen source-pretrained model, acting as 'source-like' data. The SimATTA algorithm partitions incoming test data into high and low entropy sets. Low-entropy data are pseudo-labeled by the frozen source model. High-entropy samples are actively selected for labeling using an Incremental Clustering (IC) technique, which is a novel continual clustering method based on weighted K-means to store representative 'anchors' of seen distributions and adaptively control the number of new clusters/anchors. Finally, the model is fine-tuned using both pseudo-labeled low-entropy data and oracle-labeled high-entropy anchors, with balanced weights to optimize adaptation and mitigate CF.
+
+# GitHub URLs List
+['https://github.com/divelab/ATTA', 'https://github.com/DequanWang/tent', 'https://github.com/mr-eggplant/EATA', 'https://github.com/qinenergy/cotta', 'https://github.com/mr-eggplant/SAR', 'https://github.com/virajprabhu/CLUE']
+Output:
+{
+    "index": 0
+}
