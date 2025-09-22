@@ -1,0 +1,17 @@
+
+Input:
+# Task
+You carefully read the contents of the “Paper Outline” and select one GitHub link from the “GitHub URLs List” that you think is most relevant to the contents.
+# Constraints
+- Output the index number corresponding to the selected GitHub URL.
+- Be sure to select only one GitHub URL.
+- If there is no related GitHub link, output None.
+# Paper Outline
+EcoTTA consists of two main components: 1) A memory-efficient architecture with frozen original networks and attached lightweight meta networks. The encoder of the pre-trained model is partitioned into K parts, with meta networks (each comprising one batch normalization and one convolution block) attached to each part. Only these meta networks are adapted during test-time, while original networks are frozen to avoid storing large intermediate activations. Before deployment, meta networks are warmed up on the source dataset for a small number of epochs. 2) A self-distilled regularization method. This regularization minimizes the L1 distance between the output of the meta networks (˜xk) and the output of the corresponding frozen original network parts (xk). This preserves source knowledge and prevents deviation, thereby mitigating catastrophic forgetting and error accumulation. The overall loss combines entropy minimization (for samples below a threshold) with this self-distilled regularization.
+
+# GitHub URLs List
+['https://github.com/shachoi/RobustNet', 'https://github.com/DequanWang/tent', 'https://github.com/vita-epfl/ttt-plus-plus', 'https://github.com/qinenergy/cotta', 'https://github.com/mr-eggplant/EATA', 'https://github.com/TaesikGong/NOTE', 'https://github.com/TaesikGong/NOTE', 'https://github.com/mit-han-lab/tinyml', 'https://github.com/ASU-ESIC-FAN-Lab/RepNet', 'https://github.com/mit-han-lab/tinyml', 'https://github.com/pytorch/vision']
+Output:
+{
+    "index": 3
+}
