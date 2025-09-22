@@ -1,0 +1,17 @@
+
+Input:
+# Task
+You carefully read the contents of the “Paper Outline” and select one GitHub link from the “GitHub URLs List” that you think is most relevant to the contents.
+# Constraints
+- Output the index number corresponding to the selected GitHub URL.
+- Be sure to select only one GitHub URL.
+- If there is no related GitHub link, output None.
+# Paper Outline
+The core methodology involves a theoretical derivation of a conservation law for GAT gradient flow dynamics, leveraging rescale invariance and positive homogeneity of activation functions (like ReLU). Based on this insight, the paper proposes a balanced initialization scheme. This scheme sets attention parameters to zero at initialization and scales feature weights (Wl) to satisfy a derived norm preservation law (Wl[i, :]^2 - al[i]^2 = Wl+1[: i]^2). For further improvement, it integrates a Looks-Linear-Orthogonal (LLortho) initialization for feature weights, known for inducing dynamical isometry in perceptrons, prior to the balancing procedure. The approach is validated on GATv2 and GCN models, focusing on the interplay of feature and attention weight norms.
+
+# GitHub URLs List
+['https://github.com/Diego999/pyGAT']
+Output:
+{
+    "index": 0
+}
