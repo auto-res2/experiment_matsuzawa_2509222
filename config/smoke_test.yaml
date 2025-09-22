@@ -1,0 +1,26 @@
+# config/smoke_test.yaml
+# Small, quick-to-run configuration suitable for CI or local sanity checks
+
+seed: 42
+run_name: smoke
+
+# dataset --------------------------------------------------------------------
+dataset: Cora
+dataset_root: ./data
+
+# model ----------------------------------------------------------------------
+num_layers: 2
+hidden_dim: 32
+heads: 4
+dropout: 0.5
+
+# training -------------------------------------------------------------------
+epochs: 2
+batch_size: 256
+lr: 0.005
+weight_decay: 0.0005
+
+# sampler (SHANS) ------------------------------------------------------------
+sampler: shans
+k_min: 2
+k_max: 10

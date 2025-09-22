@@ -1,0 +1,30 @@
+# config/full_experiment.yaml
+# Full-scale configuration matching Experiment-1 (variance-aware budgeting)
+
+seed: 42
+run_name: full
+
+# dataset --------------------------------------------------------------------
+dataset: ogbn-products
+dataset_root: ./data
+
+# model ----------------------------------------------------------------------
+num_layers: 10
+hidden_dim: 128
+heads: 8
+dropout: 0.6
+
+# training -------------------------------------------------------------------
+epochs: 50
+batch_size: 1024
+lr: 0.0025
+weight_decay: 0.0005
+
+# sampler (full SHANS) -------------------------------------------------------
+sampler: shans
+k_min: 2
+k_max: 25
+
+# SHANS additional params ----------------------------------------------------
+S: 64
+theta_deg: 20
