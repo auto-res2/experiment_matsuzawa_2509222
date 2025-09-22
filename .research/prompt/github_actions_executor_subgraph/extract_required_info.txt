@@ -1,0 +1,43 @@
+
+Input:
+The Python standard output and errors are provided below.
+Extract all information related to the experimental results from the standard output, and extract the Python error details from the errors, outputting them exactly as they are without any modifications.
+Do not extract unnecessary execution logs or information about Python package installations.
+
+# Standard Output
+=== [PHASE 2/2] Full experiment start Mon Sep 22 06:19:56 AM UTC 2025 ===
+Warning: NeighborLoader dependencies missing, falling back to full-batch training
+{
+  "val_accuracy": 0.5299999713897705,
+  "test_accuracy": 0.5289999842643738
+}
+Warning: NeighborLoader dependencies missing, falling back to full-batch training
+{
+  "val_accuracy": 0.19599999487400055,
+  "test_accuracy": 0.18000000715255737
+}
+=== [PHASE 2/2] Full experiment end Mon Sep 22 06:20:16 AM UTC 2025 ===
+
+
+# Error
+warning: No `requires-python` value found in the workspace. Defaulting to `>=3.11`.
+/home/toma/pt-80-1-a-13/_work/experiment_matsuzawa_2509222/experiment_matsuzawa_2509222/.venv/lib/python3.11/site-packages/torch_geometric/sampler/neighbor_sampler.py:61: UserWarning: Using 'NeighborSampler' without a 'pyg-lib' installation is deprecated and will be removed soon. Please install 'pyg-lib' for accelerated neighborhood sampling
+  warnings.warn(f"Using '{self.__class__.__name__}' without a "
+Downloading https://github.com/kimiyoung/planetoid/raw/master/data/ind.pubmed.x
+Downloading https://github.com/kimiyoung/planetoid/raw/master/data/ind.pubmed.tx
+Downloading https://github.com/kimiyoung/planetoid/raw/master/data/ind.pubmed.allx
+Downloading https://github.com/kimiyoung/planetoid/raw/master/data/ind.pubmed.y
+Downloading https://github.com/kimiyoung/planetoid/raw/master/data/ind.pubmed.ty
+Downloading https://github.com/kimiyoung/planetoid/raw/master/data/ind.pubmed.ally
+Downloading https://github.com/kimiyoung/planetoid/raw/master/data/ind.pubmed.graph
+Downloading https://github.com/kimiyoung/planetoid/raw/master/data/ind.pubmed.test.index
+Processing...
+Done!
+/home/toma/pt-80-1-a-13/_work/experiment_matsuzawa_2509222/experiment_matsuzawa_2509222/.venv/lib/python3.11/site-packages/torch_geometric/sampler/neighbor_sampler.py:61: UserWarning: Using 'NeighborSampler' without a 'pyg-lib' installation is deprecated and will be removed soon. Please install 'pyg-lib' for accelerated neighborhood sampling
+  warnings.warn(f"Using '{self.__class__.__name__}' without a "
+
+Output:
+{
+    "extracted_output": "{\n  \"val_accuracy\": 0.5299999713897705,\n  \"test_accuracy\": 0.5289999842643738\n}\n{\n  \"val_accuracy\": 0.19599999487400055,\n  \"test_accuracy\": 0.18000000715255737\n}",
+    "extracted_error": "warning: No `requires-python` value found in the workspace. Defaulting to `>=3.11`.\n/home/toma/pt-80-1-a-13/_work/experiment_matsuzawa_2509222/experiment_matsuzawa_2509222/.venv/lib/python3.11/site-packages/torch_geometric/sampler/neighbor_sampler.py:61: UserWarning: Using 'NeighborSampler' without a 'pyg-lib' installation is deprecated and will be removed soon. Please install 'pyg-lib' for accelerated neighborhood sampling\n  warnings.warn(f\"Using '{self.__class__.__name__}' without a \"\n/home/toma/pt-80-1-a-13/_work/experiment_matsuzawa_2509222/experiment_matsuzawa_2509222/.venv/lib/python3.11/site-packages/torch_geometric/sampler/neighbor_sampler.py:61: UserWarning: Using 'NeighborSampler' without a 'pyg-lib' installation is deprecated and will be removed soon. Please install 'pyg-lib' for accelerated neighborhood sampling\n  warnings.warn(f\"Using '{self.__class__.__name__}' without a \" )"
+}
