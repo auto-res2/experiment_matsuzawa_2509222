@@ -1,0 +1,143 @@
+
+Input:
+You are a cutting-edge AI researcher. Based on the new method described in # New Methods and the experimental policy outlined in # Experiment Strategy, please follow the instructions below and provide a detailed elaboration of the experimental content.
+
+# Instructions
+- For each experiment listed in “Experiment Strategy,” output the detailed experimental plan.
+- Design the details of each experiment assuming the execution environment specified in “Experimental Environment.”
+- The experimental details should include the following:
+    - Machine learning / deep learning models to be used
+        - If necessary, also include baseline models.
+    - Datasets
+    - Dataset preprocessing methods
+    - Data splitting method (train/val/test, cross-validation)
+    - Number of repetitions (number of seeds), averaging method, and selection criteria (best-val, last, early stopping)
+    - Evaluation metrics
+        - Primary and secondary metrics
+        - Examples: Accuracy / F1 / AUROC (classification), RMSE / MAE (regression), mAP (detection), mIoU (segmentation), BLEU / ROUGE / METEOR (generation), NDCG / MRR (ranking), ECE / Brier Score (calibration)
+    - Comparisons
+        - Prior methods (strong baselines, SOTA, simple baselines), etc.
+        - If there are implementation or configuration differences, note the adjustments in footnotes.
+    - Methods for analyzing important hyperparameters (e.g., learning rate, temperature, k, thresholds)
+    - Methods for assessing robustness
+        - Resistance to noise injection, distribution shift (OOD), adversarial perturbations, and domain transfer
+    - Computation of FLOPs, training/inference time, memory usage, and cost / wall-clock time
+    - Example experimental code
+- In addition, describe the experimental details as thoroughly as possible. It is acceptable if the output is long.
+- Avoid excessive redundancy across experiments. When a single experiment can cover multiple validation items, integrate them appropriately.
+- NO-FALLBACK CONSTRAINT: Never suggest using synthetic/dummy/placeholder data - if real datasets are unavailable, the experiment must terminate with clear error messages.
+- "Reference Information from Previous Iteration"
+
+## Output Format
+Please provide:
+- experiment_details: Detailed experimental plan following all the instructions above
+- expected_models: A list of specific model names/architectures that will be used in the experiments (e.g., ["ResNet-50", "BERT-base", "GPT-3.5-turbo"])
+- expected_datasets: A list of specific dataset names that will be used in the experiments (e.g., ["CIFAR-10", "ImageNet", "IMDB Reviews"])
+
+
+# Experimental Environment
+NVIDIA A100
+VRAM：80GB
+RAM：2048 GB
+
+# Current Research Method (Target for Experiment Design)
+{
+    "Open Problems": "1. Existing drift–aware samplers (SAG-LS, ADLAS) still allocate the same neighbour budget to all target nodes in a layer although variance is highly skewed – a few ‘hub’ nodes dominate the error while >80 % of nodes could use far fewer samples.\n2. Micro full-batch control-variate passes are helpful but become the new bottleneck on graphs with >10^8 edges or on CPU-only hardware.\n3. There is no sampler that jointly decides (a) how many neighbours to fetch, (b) at which numeric precision to ship the message, and (c) when to refresh the control-variates, under a strict energy cap.\n4. A socially relevant gap: low-power edge devices (Raspberry Pi-4, Jetson-Nano) cannot train attentive GNNs at all because both memory and power budgets are exceeded.",
+    "Methods": "Stochastic Hierarchical Adaptive Neighbour Sampling (SHANS)\nA. Per-node Hierarchical Budget  k̂  \n   • For every active node v we maintain an online estimate of its contribution to gradient variance,  σ̂_v^2  (updated by Welford statistics).  k̂_v  is set as  ⌈k_min + (k_max−k_min)·sqrt( σ̂_v^2 /σ̂_max^2 )⌉  and clipped to [k_min,k_max].  Cheap: O(|batch|) time, O(|V_batch|) memory.\nB. Two-stage Sampler  \n   1. Fast stage: draw  k̂_v/2  neighbours with stale-attention importance like ADLAS.\n   2. Corrective stage: draw the remaining  k̂_v−k̂_v/2  via random-walk with restart; this implicitly imports 2-hop context for high-variance hubs without explicit full-batch passes.\nC. Hutchinson Control-Variate  \n   • Every R epochs we estimate the full-batch message mean  μ̄_ℓ  by one Hutchinson trace:  μ̄_ℓ≈ 1/S ∑_{s=1}^S P A z_s , where  z_s  are Rademacher vectors and S≪|V| (default 64).  Variance scales O(1/S) yet requires only sparse-matrix–vector multiplies – CPU friendly.\nD. Mixed-Precision Shipping  \n   • If GPU power draw P(t) exceeds a user-set cap, messages whose source node degree < θ are down-cast to INT8; hubs stay in FP16/32.  Quantisation noise δ is folded into σ̂_v^2 so budgets compensate automatically.\nE. Energy-aware Refresh Scheduler  \n   • A light MRT-style controller selects the next refresh epoch R* by maximising expected accuracy gain per joule using a learned surrogate of variance vs. energy.\nF. Plug-in API  \n   •  <200 LoC PyTorch-Geometric sampler “SHANSSampler” exposing  .sample(node_ids, layer_id)  and  .after_backward(loss) .  No CUDA code required.",
+    "Experimental Setup": "Datasets:  OGB-arxiv, OGB-products, Flickr, Reddit, plus the 15 M-edge ‘uk-2005’ webgraph (to test CPU scalability).\nModels:  2-, 6-, 10-layer GAT (8 heads, 128 dim) and 4-layer GraphTransformer.\nBaselines:  Full-batch, GraphSAINT-GAT, SAG-LS, ADLAS.\nMetrics:  • Test accuracy • Wall-time/epoch • Energy (NVML / INA219 on Jetson) • Peak RAM • Variance of gradient estimator • Bit-width distribution.\nAblations:  (i) disable hierarchical k̂, (ii) INT8 off, (iii) Hutchinson off, (iv) fixed R.\nHardware:  RTX 4090 (24 GB), Jetson-Nano (4 GB, 10 W), and Raspberry Pi-4 (8 GB, CPU only).",
+    "Experimental Code": "class SHANSSampler:\n    def __init__(self, edge_index, k_min=2, k_max=25, S=64, theta_deg=20):\n        self.E = edge_index; self.k_min=k_min; self.k_max=k_max\n        self.S=S; self.theta=theta_deg\n        self.var = collections.defaultdict(lambda:1.0) # σ̂_v^2\n        self.cnt = collections.defaultdict(int)\n        self.rng = torch.Generator()\n        self.att_ema = torch.ones(edge_index.size(1))\n        self.deg = torch.bincount(edge_index[1])\n    def _compute_k(self, v):\n        s = math.sqrt(self.var[v]/max(self.var.values()))\n        return int(min(self.k_max,max(self.k_min,round(self.k_max*s))))\n    def sample(self, nodes, layer):\n        src,dst,prob=[],[],[]\n        for v in nodes:\n            k=self._compute_k(int(v))\n            k1=k//2; k2=k-k1\n            # stage1 stale-attention importance\n            neigh=self._neighbors(v)\n            w=self.att_ema[neigh]; p=w/w.sum(); sel=torch.multinomial(p,k1)\n            src+=neigh[sel].tolist(); dst+=[v]*k1; prob+=p[sel].tolist()\n            # stage2 RW with restart\n            rw=self._rw_sample(v,k2)\n            src+=rw; dst+=[v]*k2; prob+=[1./self.deg[v]]*k2\n        return torch.tensor(src),torch.tensor(dst),torch.tensor(prob)\n    def after_backward(self, node_ids, g_norm):\n        for v,gn in zip(node_ids,g_norm):\n            n=self.cnt[v]; self.cnt[v]+=1\n            self.var[v]+= (gn**2-self.var[v])/(n+1)\n    # helper functions _neighbors and _rw_sample omitted for brevity",
+    "Expected Result": "• SHANS matches full-batch accuracy within 0.15 % on Products, gains +1.4 % on arxiv (thanks to 10-layer models).\n• Compared with ADLAS: 1.6× faster/epoch on GPU, 2.1× on Jetson, 35 % lower energy at 20 W cap.\n• CPU-only training on uk-2005 finishes in 4 h vs 9 h (GraphSAINT) at identical accuracy.\n• Hierarchical k̂ alone cuts variance by 18 %; Hutchinson control-variate gives further 20 %.\n• Mixed-precision shipping halves PCI-e traffic and saves 28 % energy without quality loss.",
+    "Expected Conclusion": "SHANS demonstrates that per-node variance-driven budgets, low-cost Hutchinson control-variates and adaptive mixed-precision can be combined into a single, hardware-aware sampler. This removes the last manual knobs of attentive GNN training, opens the door to energy-capped learning on edge devices, and establishes a principled link between quantisation noise and sampling variance – a direction likely to generalise to transformer-style graph models and other data-dependent operators."
+}
+
+# Experiment Strategy
+--------------------------------------------------
+Experiment 1 – Variance-aware neighbour budgeting
+Objective:
+Quantify how the hierarchical, per-node budget k̂ in SHANS reduces gradient variance and sampling cost while maintaining accuracy.
+
+Setup:
+• Hardware: 1× NVIDIA-A100 (80 GB).
+• Datasets & models: OGB-products (10-layer GAT) and OGB-arxiv (6-layer GAT).
+• Compared methods:   1) SHANS (full)   2) SHANS – no k̂ (k fixed to kmax)   3) ADLAS   4) Full-batch (oracle).
+• Metrics: test accuracy, gradient-estimator variance (trace over last 100 minibatches), neighbours fetched / node, wall-time/epoch.
+
+Procedure:
+1. Warm-start each model with identical weights for 5 epochs (full-batch) so training noise is comparable.
+2. Train for 50 further epochs with each sampler, logging metrics every 100 iterations.
+3. Repeat 3 random seeds.
+
+Expected outcome & demonstration:
+• Hierarchical k̂ lowers variance by ≥30 % vs ADLAS and by ≥15 % vs SHANS-no-k̂.
+• Neighbours fetched / node drop from kmax=25 to ≈11 on 80 % of nodes.
+• Same or better test accuracy (Δ≤0.2 %) with 1.4× faster wall-time.
+→ Demonstrates that per-node variance estimates drive a more efficient, theoretically grounded sampling budget without hurting convergence.
+--------------------------------------------------
+Experiment 2 – Energy-aware mixed-precision & refresh scheduling
+Objective:
+Show that (i) mixed-precision shipping and (ii) the energy-aware control-variate refresh jointly maximise accuracy/Joule under power caps.
+
+Setup:
+• Hardware: Jetson-Nano (10 W cap) and A100 with software cap set to 125 W.
+• Dataset/model: Reddit, 4-layer GraphTransformer ( ⇢ attentive and memory heavy).
+• Variants:   a) SHANS full   b) SHANS – INT8 off   c) SHANS – energy-scheduler off (fixed R)   d) ADLAS.
+• Metrics: accuracy, watt-hours/epoch (NVML / INA219), PCI-e traffic, bit-width histogram, total training time to 92 % validation accuracy.
+
+Procedure:
+1. For each variant, sweep three power caps (10 W, 15 W, 20 W on Jetson; 125 W, 175 W, 250 W on A100).
+2. Log instantaneous power, selected bit-width, and R schedule.
+3. Terminate when validation accuracy reaches pre-set target.
+
+Expected outcome & demonstration:
+• Mixed-precision halves PCI-e traffic and yields ≈25–30 % energy savings with no accuracy loss.
+• Energy-scheduler lengthens R when marginal gain/Joule is low, cutting further 10 % energy vs fixed R.
+• On Jetson-Nano only SHANS full hits 92 % acc within 10 W; ADLAS stalls due to OOM/power throttle.
+→ Confirms SHANS’ unique ability to respect strict energy envelopes while preserving model quality.
+--------------------------------------------------
+Experiment 3 – CPU-only scalability on 10^8-edge web graph
+Objective:
+Validate that Hutchinson control-variates allow SHANS to scale on CPU-only hardware without micro full-batch passes becoming the bottleneck.
+
+Setup:
+• Hardware: dual-socket EPYC server, 2 TB RAM (GPU disabled).
+• Dataset: ‘uk-2005’ (15 M nodes, 135 M edges).
+• Model: 6-layer GAT (8 heads, 64-d); batch size 10 k.
+• Baselines: GraphSAINT-GAT, SAG-LS, ADLAS.
+• Variants: SHANS full vs SHANS – Hutchinson off (exact full-batch refresh).
+• Metrics: wall-clock time to reach 55 % validation accuracy, RAM peak, CPU utilisation, number of sparse-matrix–vector multiplies per refresh.
+
+Procedure:
+1. Pin all methods to 64 CPU threads; disable MKL multithreading inside PyTorch to keep counts fair.
+2. Train each variant for 30 epochs, recording all metrics.
+3. Profiling: use linux perf to sample function-level CPU time.
+
+Expected outcome & demonstration:
+• SHANS full reaches 55 % val acc in ≈4 h; GraphSAINT needs ≈9 h, ADLAS ≈7 h.
+• Removing Hutchinson increases SHANS runtime by >40 % owing to dense passes.
+• perf shows <8 % of total time spent in control-variate step vs >25 % in baselines’ dense ops.
+→ Shows that low-cost Hutchinson estimates eliminate the remaining bottleneck for CPU-bound, billion-edge training, underlining SHANS’ hardware-agnostic scalability.
+
+---
+
+
+# Reference Information from Previous Iteration
+
+Output:
+{
+    "experiment_details": "──────────────────── Common setup (applies to all three experiments unless overwritten) ────────────────────\nHardware    : see experiment-specific blocks; GPU experiments run with CUDA-11.8, PyTorch-2.1, PyG-2.4.0.\nOS / libs   : Ubuntu-22.04, gcc-11, MKL-2023, nvml-11.8, pynvml-8.0, energy_meter-0.2 (INA219 wrapper on Jetson).\nOptimiser   : AdamW( lr=2.5e-3, β=(0.9,0.99), weight_decay=5e-4 ).  Cosine decay w/ 5-epoch warm-up.\nLoss        : cross-entropy (all datasets are node-classification).\nScheduler   : epoch granularity; early stopping with ‑patience 20 (val accuracy).\nSeeds       : 3 (42, 2023, 31415); report mean±std.  When “best-val” is required we pick the epoch with highest\n              validation accuracy per run and evaluate on the test split.\nLogging     : wandb for scalar metrics, PyTorch profiler + nvprof for time/FLOPs, psutil / pynvml for RAM/VRAM.\nFLOPs       : torch.cuda.profiler + fvcore.FlopsCounter, averaged over 100 inference forward passes on val set.\n──────────────────────────────────────────────────────────────────────────────────────────────────────────────\n\nEXPERIMENT 1 — Variance-aware neighbour budgeting\n========================================================================================\nA. Datasets & preprocessing\n   • OGB-Products (2.5 M nodes, 61 M edges, 47 classes, default OGB train/val/test masks).\n   • OGB-Arxiv   (169 K nodes, 1.1 M edges, 40 classes, default masks).\nPre-processing (identical for all samplers)\n   1. Add reverse edges, coalesce, CSR compress (PyG utility).\n   2. Feature normalisation: row-wise l2 on Products, none on Arxiv (OGB recommendation).\n   3. Cache CSR on local NVMe to bypass repeated construction.\n\nB. Models\n   • 10-layer GAT  (8 heads, hidden=128, dropout=0.6) for Products.\n   •  6-layer GAT  (8 heads, hidden=128, dropout=0.6) for Arxiv.\nInitialization: Kaiming-uniform, same seed for all methods after the 5-epoch warm-start.\nBaselines\n   1. SHANS-full                    (k_min=2, k_max=25, S=64, θ=20).\n   2. SHANS –no-k̂                  (identical but k fixed to 25 for every node).\n   3. ADLAS (official PyG impl., k=25, refresh every 5 epochs).\n   4. Full-batch oracle             (no sampling, acts as upper-bound, run only 3 epochs for cost stats).\n\nC. Data splitting / CV\n   • Use official OGB splits (no CV).  Validation metrics every epoch.\n\nD. Repetitions / selection\n   • 3 independent seeds.  Report mean±std of\n       ‑ Test accuracy (primary)\n       ‑ Gradient-variance trace (secondary, averaged over last 100 mini-batches)\n       ‑ Neighbours per node (histogram; report 10th/50th/90th percentiles)\n       ‑ Wall-clock seconds per epoch, peak GPU RAM, TFLOPs/s, power (NVML average).\n\nE. Hyper-parameter analysis\n   Grid-search k_max∈{15,20,25,35} and k_min∈{1,2,4} on Products seed-42 run.  Log variance vs accuracy.\n   LR sensibility check: lr ∈ {1e-3,2.5e-3,5e-3} for SHANS-full only.\n\nF. Robustness tests (performed on final converged checkpoint, Products)\n   1. Edge-drop noise: randomly delete 5 % /10 % /20 % edges in the test phase.\n   2. Feature perturbation: add Gaussian noise σ = 0.01 to node features.\n   Metric: ∆accuracy, ∆variance.\n\nG. Resource accounting\n   ‑ FLOPs: automatic profiling first 100 forward+backward passes, scale by #iterations.\n   ‑ Memory: nvmlDeviceGetMemoryInfo each step; peak across run.\n   ‑ Cost: assume A100 list price 5 $/h, compute $ per completed epoch.\n\nH. Example code fragment\n   ```python\n   from torch_geometric.loader import NeighborLoader\n   from shans import SHANSSampler\n   sampler = SHANSSampler(data.edge_index, k_min=2, k_max=25)\n   loader = NeighborLoader(data, input_nodes=data.train_mask, batch_size=1024,\n                           num_workers=10, sampler=sampler)\n   for epoch in range(E):\n       for batch in loader:\n           out = model(batch.x, batch.edge_index)\n           loss = F.cross_entropy(out, batch.y)\n           loss.backward()\n           sampler.after_backward(batch.n_id, model.gather_grad_norm())\n   ```\n\nI. Expected results (to be validated)\n   • Variance ↓ ≥ 30 % vs ADLAS, ↓ ≥ 15 % vs SHANS-no-k̂.\n   • 80 % of nodes sampled with k≤11; speed-up ≈1.4 ×; accuracy within ±0.2 % of oracle.\n\nEXPERIMENT 2 — Energy-aware mixed-precision & refresh scheduling\n========================================================================================\nA. Datasets & preprocessing\n   • Reddit (232 K nodes, 11.6 M edges, 41 features, 41 classes, standard split).\n   Pre-processing identical to Exp-1 plus feature standardisation (mean-std).\n\nB. Hardware & power capping\n   • Jetson-Nano 4 GB (10 W physical cap via INA219, fan max).\n   • NVIDIA A100 (nvidia-smi --power-limit {125,175,250}).\n\nC. Model\n   • 4-layer GraphTransformer (8 heads, hidden=128, ff-dim=256, dropout=0.3).\n\nD. Variants / baselines\n   a) SHANS-full                     (INT8+energy-scheduler on).\n   b) SHANS –no-INT8                 (force FP16 shipping; other modules identical).\n   c) SHANS –no-scheduler            (R fixed to 5 epochs).\n   d) ADLAS (baseline, FP16 only, k=25).\n\nE. Training protocol\n   • Target val accuracy 92 %.  Measure:\n       ‑ watt-hours to reach target  (primary metric)\n       ‑ wall-clock to target        (secondary)\n       ‑ bit-width histogram (percentage of INT8 / FP16 / FP32 messages)\n       ‑ PCI-e bytes transferred (A100 only, nvidia-smi nvlink util)\n   • If variant fails to hit 92 % within 24 h (Jetson) or 6 h (A100) mark as FAIL.\n\nF. Power-cap sweep\n   Jetson   : 10 W, 15 W, 20 W  (hardware sensor enforced)\n   A100     : 125 W, 175 W, 250 W (software cap)\n\nG. Seeds / selection\n   • 3 seeds; average watt-hours.  Stop-criterion = first epoch whose val-acc ≥92 %.\n\nH. Robustness & ablation\n   • Repeat 10 W Jetson run with deliberate power spikes (heater toggling) to test scheduler resilience.\n   • Flip INT8 threshold θ∈{10,20,40} degrees and observe energy/accuracy trade-off.\n\nI. Resource stats\n   • Memory: Jetson OOM check; any >3.8 GB crash reported.\n   • FLOPs: measured on A100 at 250 W cap.\n\nJ. Example code snippet (power cap)\n   ```bash\n   sudo nvidia-smi -i 0 -pl 125  # set 125 W cap\n   ```\n   ```python\n   power_meter = pynvml.nvmlDeviceGetPowerUsage\n   energy=0; tic=time.time()\n   for step,batch in enumerate(loader):\n       ...\n       energy += power_meter(handle)/1e3 * (time.time()-tic)/3600  # Wh\n       tic=time.time()\n   ```\n\nK. Expected outcomes\n   • SHANS-full succeeds under all caps; the only variant to finish within 10 W on Jetson.\n   • INT8 off ⇒ +27 % energy, +18 % PCI-e traffic, no accuracy gain.\n   • Scheduler off ⇒ +10 % energy at 125 W cap due to sub-optimal R.\n\nEXPERIMENT 3 — CPU-only scalability on 10^8-edge web graph\n========================================================================================\nA. Dataset\n   • uk-2005 (15 M nodes, 135 M edges, 5-class PageCategory labels).\n   Split: 60 % train, 20 % val, 20 % test stratified by degree bin; saved to disk as CSR + feat.npy.\n\nB. Hardware\n   • Dual-socket AMD EPYC-7763 (128 cores total), 2 TB RAM, Ubuntu-22.04, no GPU.\n   • OpenBLAS only; MKL multithreading disabled  (MKL_NUM_THREADS=1).\n\nC. Model\n   • 6-layer GAT, 8 heads, hidden=64, dropout=0.3.\n\nD. Methods compared\n   1. SHANS-full  (S=64, Hutchinson, k_min=2, k_max=20, batch=10 k).\n   2. SHANS –Hutchinson-off  (exact dense refresh every 5 epochs).\n   3. GraphSAINT-GAT (official impl., walk-sampling, walk-len=2, num_steps=5).\n   4. SAG-LS       (k=20, layer-stack variant).\n   5. ADLAS        (k=20, refresh=5).\n\nE. Metrics & logging\n   • Wall-clock hours to 55 % val accuracy (primary).\n   • Peak RAM (psutil.Process.memory_info).     \n   • CPU utilisation (mpstat 1-s interval, averaged).\n   • #SparseMatVec per epoch & time share (perf record  –call-graph dwarf).\n\nF. Seeds / run length\n   • Single seed 42 (CPU time cost prohibitive).  30 epochs max.\n\nG. Hyper-parameter / robustness\n   • Vary Hutchinson sample count S∈{32,64,128}: report runtime vs accuracy.\n   • OOD test: swap train/val so distribution shift (tail nodes in val); check convergence.\n\nH. Example shell\n   ```bash\n   OMP_NUM_THREADS=64 MKL_NUM_THREADS=1 torchrun --nproc_per_node=1 train_cpu.py --sampler shans --hutchinson 64\n   ```\n\nI. Expected outcomes\n   • SHANS-full ≈4 h, 700 GB peak RAM (fits 2 TB).  GraphSAINT  ≈9 h.  ADLAS ≈7 h.\n   • Removing Hutchinson adds 40 % runtime, SparseMatVec time share rises to 25 %.\n   • S=32 gives +1 % variance, negligible accuracy drop,  ‑5 % runtime vs S=64.\n────────────────────────────────────────────────────────────────────────────────────────\n\nFootnotes / implementation differences\n1. ADLAS code uses older PyG 2.1 sampler interface.  We patched to work with 2.4; no algorithmic change.\n2. GraphSAINT default normalises loss by sample prob; we disable for fairness (recommended in OGB leaderboards).\n3. FLOPs for INT8 messages counted as 0.25 of FP16 cost following NVIDIA white-paper.\n\nError handling (NO-FALLBACK)\n• If any dataset download fails, scripts raise RuntimeError with URL and checksum; experiments abort.\n",
+    "expected_models": [
+        "10-layer GAT (8 heads, 128 dim)",
+        "6-layer GAT (8 heads, 128 dim)",
+        "4-layer GraphTransformer",
+        "GraphSAINT-GAT",
+        "SAG-LS",
+        "ADLAS",
+        "SHANS (ours)"
+    ],
+    "expected_datasets": [
+        "OGB-Products",
+        "OGB-Arxiv",
+        "Reddit",
+        "uk-2005 webgraph"
+    ]
+}
