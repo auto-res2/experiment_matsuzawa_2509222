@@ -1,0 +1,17 @@
+
+Input:
+# Task
+You carefully read the contents of the “Paper Outline” and select one GitHub link from the “GitHub URLs List” that you think is most relevant to the contents.
+# Constraints
+- Output the index number corresponding to the selected GitHub URL.
+- Be sure to select only one GitHub URL.
+- If there is no related GitHub link, output None.
+# Paper Outline
+The core methodology involves deriving a conservation law for GATs with positive homogeneous activation functions (e.g., ReLU, LeakyReLU), which explains that the difference between the squared l2-norms of incoming and outgoing parameters to a neuron, including attention weights, remains approximately constant during gradient flow. This law reveals that imbalanced parameter norms at initialization hinder gradient propagation and parameter changes. To address this, the paper introduces a balanced initialization scheme. This scheme sets attention parameters to zero and scales feature weights such that the incoming and outgoing weight norms for each neuron satisfy the derived conservation law (making the 'degree of balancedness' zero). It also incorporates a Looks-Linear-Orthogonal (LLortho) structure for feature weights to enhance trainability, known to induce dynamical isometry in perceptrons with ReLU activations.
+
+# GitHub URLs List
+['https://github.com/Diego999/pyGAT']
+Output:
+{
+    "index": 0
+}
