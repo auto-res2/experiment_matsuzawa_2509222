@@ -1,0 +1,17 @@
+
+Input:
+# Task
+You carefully read the contents of the “Paper Outline” and select one GitHub link from the “GitHub URLs List” that you think is most relevant to the contents.
+# Constraints
+- Output the index number corresponding to the selected GitHub URL.
+- Be sure to select only one GitHub URL.
+- If there is no related GitHub link, output None.
+# Paper Outline
+The proposed Improved Test-Time Adaptation (ITTA) method comprises two main strategies: 1) A learnable consistency loss for the TTT task. Instead of empirically defining an auxiliary objective, ITTA uses a consistency loss, Lwcont = ||fw(z - z')||, where fw is a weight subnetwork with learnable parameters. The training process for the feature extractor (fθ) and classifier (fϕ) minimizes Lmain + αLwcont. To ensure alignment between the consistency loss and the main loss (Lmain), fw's parameters are updated by minimizing the L2 norm between the normalized gradients of Lmain and Lwcont with respect to fθ, i.e., min w ||gmain_hat - gwcont_hat||. 2) Including additional adaptive parameters. During the test phase, ITTA introduces new adaptive block parameters (fΘ) after each block of the pretrained feature extractor (fθ). Only these newly introduced adaptive parameters are updated using the learned consistency loss (min Θ ||fw(z - z')||), while the original parameters of fθ and fϕ remain unchanged. The online setting is used for updating fΘ.
+
+# GitHub URLs List
+['https://github.com/liangchen527/ITTA']
+Output:
+{
+    "index": 0
+}
