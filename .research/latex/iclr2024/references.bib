@@ -5,3 +5,606 @@
   publisher = {GitHub},
   url       = {https://github.com/airas-org/airas}
 }
+
+% ===========================================
+% REQUIRED CITATIONS
+% These papers must be cited in the manuscript
+% ===========================================
+
+@article{author-year-adaptive,
+ title = {Adaptive Structural Fingerprints for Graph Attention Networks}
+}
+
+@article{author-year-dynamic,
+ title = {Dynamic Rescaling for Training GNNs}
+}
+
+@article{author-year-graphqntk,
+ title = {GraphQNTK: Quantum Neural Tangent Kernel for Graph Data}
+}
+
+@article{ding-2024-sketch,
+ abstract = {Graph Neural Networks (GNNs) are widely applied to graph learning problems
+such as node classification. When scaling up the underlying graphs of GNNs to a
+larger size, we are forced to either train on the complete graph and keep the
+full graph adjacency and node embeddings in memory (which is often infeasible)
+or mini-batch sample the graph (which results in exponentially growing
+computational complexities with respect to the number of GNN layers). Various
+sampling-based and historical-embedding-based methods are proposed to avoid
+this exponential growth of complexities. However, none of these solutions
+eliminates the linear dependence on graph size. This paper proposes a
+sketch-based algorithm whose training time and memory grow sublinearly with
+respect to graph size by training GNNs atop a few compact sketches of graph
+adjacency and node embeddings. Based on polynomial tensor-sketch (PTS) theory,
+our framework provides a novel protocol for sketching non-linear activations
+and graph convolution matrices in GNNs, as opposed to existing methods that
+sketch linear weights or gradients in neural networks. In addition, we develop
+a locality-sensitive hashing (LSH) technique that can be trained to improve the
+quality of sketches. Experiments on large-graph benchmarks demonstrate the
+scalability and competitive performance of our Sketch-GNNs versus their
+full-size GNN counterparts.},
+ arxiv_url = {https://arxiv.org/pdf/2406.15575v1.pdf},
+ author = {Mucong Ding and Tahseen Rabbani and Bang An and Evan Z Wang and Furong Huang},
+ github_url = {https://github.com/pyg-team/pytorch_geometric},
+ title = {Sketch-GNN: Scalable Graph Neural Networks with Sublinear Training Complexity},
+ year = {2024}
+}
+
+@article{fey-2021-gnnautoscale,
+ abstract = {We present GNNAutoScale (GAS), a framework for scaling arbitrary
+message-passing GNNs to large graphs. GAS prunes entire sub-trees of the
+computation graph by utilizing historical embeddings from prior training
+iterations, leading to constant GPU memory consumption in respect to input node
+size without dropping any data. While existing solutions weaken the expressive
+power of message passing due to sub-sampling of edges or non-trainable
+propagations, our approach is provably able to maintain the expressive power of
+the original GNN. We achieve this by providing approximation error bounds of
+historical embeddings and show how to tighten them in practice. Empirically, we
+show that the practical realization of our framework, PyGAS, an easy-to-use
+extension for PyTorch Geometric, is both fast and memory-efficient, learns
+expressive node representations, closely resembles the performance of their
+non-scaling counterparts, and reaches state-of-the-art performance on
+large-scale graphs.},
+ arxiv_url = {https://arxiv.org/pdf/2106.05609v1.pdf},
+ author = {Matthias Fey and Jan E. Lenssen and Frank Weichert and Jure Leskovec},
+ title = {GNNAutoScale: Scalable and Expressive Graph Neural Networks via Historical Embeddings},
+ year = {2021}
+}
+
+@article{han-2023-hyperattention,
+ abstract = {We present an approximate attention mechanism named HyperAttention to address
+the computational challenges posed by the growing complexity of long contexts
+used in Large Language Models (LLMs). Recent work suggests that in the
+worst-case scenario, quadratic time is necessary unless the entries of the
+attention matrix are bounded or the matrix has low stable rank. We introduce
+two parameters which measure: (1) the max column norm in the normalized
+attention matrix, and (2) the ratio of row norms in the unnormalized attention
+matrix after detecting and removing large entries. We use these fine-grained
+parameters to capture the hardness of the problem. Despite previous lower
+bounds, we are able to achieve a linear time sampling algorithm even when the
+matrix has unbounded entries or a large stable rank, provided the above
+parameters are small. HyperAttention features a modular design that easily
+accommodates integration of other fast low-level implementations, particularly
+FlashAttention. Empirically, employing Locality Sensitive Hashing (LSH) to
+identify large entries, HyperAttention outperforms existing methods, giving
+significant speed improvements compared to state-of-the-art solutions like
+FlashAttention. We validate the empirical performance of HyperAttention on a
+variety of different long-context length datasets. For example, HyperAttention
+makes the inference time of ChatGLM2 50\% faster on 32k context length while
+perplexity increases from 5.6 to 6.3. On larger context length, e.g., 131k,
+with causal masking, HyperAttention offers 5-fold speedup on a single attention
+layer.},
+ arxiv_url = {https://arxiv.org/pdf/2310.05869v3.pdf},
+ author = {Insu Han and Rajesh Jayaram and Amin Karbasi and Vahab Mirrokni and David P. Woodruff and Amir Zandieh},
+ github_url = {https://github.com/insuhan/hyper-attn},
+ title = {HyperAttention: Long-context Attention in Near-Linear Time},
+ year = {2023}
+}
+
+@article{hassani-2024-faster,
+ abstract = {Neighborhood attention reduces the cost of self attention by restricting each
+token's attention span to its nearest neighbors. This restriction,
+parameterized by a window size and dilation factor, draws a spectrum of
+possible attention patterns between linear projection and self attention.
+Neighborhood attention, and more generally sliding window attention patterns,
+have long been bounded by infrastructure, particularly in higher-rank spaces
+(2-D and 3-D), calling for the development of custom kernels, which have been
+limited in either functionality, or performance, if not both. In this work, we
+aim to massively improve upon existing infrastructure by providing two new
+methods for implementing neighborhood attention. We first show that
+neighborhood attention can be represented as a batched GEMM problem, similar to
+standard attention, and implement it for 1-D and 2-D neighborhood attention.
+These kernels on average provide 895% and 272% improvement in full precision
+runtime compared to existing naive CUDA kernels for 1-D and 2-D neighborhood
+attention respectively. We find that aside from being heavily bound by memory
+bandwidth, certain inherent inefficiencies exist in all unfused implementations
+of neighborhood attention, which in most cases undo their theoretical
+efficiency gain. Motivated by the progress made into fused dot-product
+attention kernels, we developed fused neighborhood attention; an adaptation of
+fused dot-product attention kernels that allow fine-grained control over
+attention across different spatial axes. Known for reducing the quadratic time
+complexity of self attention to a linear complexity, neighborhood attention can
+now enjoy a reduced and constant memory footprint, and record-breaking half
+precision runtime. We observe that our fused implementation successfully
+circumvents some of the unavoidable inefficiencies in unfused
+implementations...},
+ arxiv_url = {https://arxiv.org/pdf/2403.04690v3.pdf},
+ author = {Ali Hassani and Wen-Mei Hwu and Humphrey Shi},
+ github_url = {https://github.com/SHI-Labs/NATTEN},
+ title = {Faster Neighborhood Attention: Reducing the O(n^2) Cost of Self Attention at the Threadblock Level},
+ year = {2024}
+}
+
+@article{liu-2020-bandit,
+ abstract = {Several sampling algorithms with variance reduction have been proposed for
+accelerating the training of Graph Convolution Networks (GCNs). However, due to
+the intractable computation of optimal sampling distribution, these sampling
+algorithms are suboptimal for GCNs and are not applicable to more general graph
+neural networks (GNNs) where the message aggregator contains learned weights
+rather than fixed weights, such as Graph Attention Networks (GAT). The
+fundamental reason is that the embeddings of the neighbors or learned weights
+involved in the optimal sampling distribution are changing during the training
+and not known a priori, but only partially observed when sampled, thus making
+the derivation of an optimal variance reduced samplers non-trivial. In this
+paper, we formulate the optimization of the sampling variance as an adversary
+bandit problem, where the rewards are related to the node embeddings and
+learned weights, and can vary constantly. Thus a good sampler needs to acquire
+variance information about more neighbors (exploration) while at the same time
+optimizing the immediate sampling variance (exploit). We theoretically show
+that our algorithm asymptotically approaches the optimal variance within a
+factor of 3. We show the efficiency and effectiveness of our approach on
+multiple datasets.},
+ arxiv_url = {https://arxiv.org/pdf/2006.05806v2.pdf},
+ author = {Ziqi Liu and Zhengwei Wu and Zhiqiang Zhang and Jun Zhou and Shuang Yang and Le Song and Yuan Qi},
+ github_url = {https://github.com/xavierzw/ogb-geniepath-bs},
+ title = {Bandit Samplers for Training Graph Neural Networks},
+ year = {2020}
+}
+
+@article{liu-2022-rsc,
+ abstract = {The training of graph neural networks (GNNs) is extremely time consuming
+because sparse graph-based operations are hard to be accelerated by hardware.
+Prior art explores trading off the computational precision to reduce the time
+complexity via sampling-based approximation. Based on the idea, previous works
+successfully accelerate the dense matrix based operations (e.g., convolution
+and linear) with negligible accuracy drop. However, unlike dense matrices,
+sparse matrices are stored in the irregular data format such that each
+row/column may have different number of non-zero entries. Thus, compared to the
+dense counterpart, approximating sparse operations has two unique challenges
+(1) we cannot directly control the efficiency of approximated sparse operation
+since the computation is only executed on non-zero entries; (2) sub-sampling
+sparse matrices is much more inefficient due to the irregular data format. To
+address the issues, our key idea is to control the accuracy-efficiency trade
+off by optimizing computation resource allocation layer-wisely and
+epoch-wisely. Specifically, for the first challenge, we customize the
+computation resource to different sparse operations, while limit the total used
+resource below a certain budget. For the second challenge, we cache previous
+sampled sparse matrices to reduce the epoch-wise sampling overhead. Finally, we
+propose a switching mechanisms to improve the generalization of GNNs trained
+with approximated operations. To this end, we propose Randomized Sparse
+Computation, which for the first time demonstrate the potential of training
+GNNs with approximated operations. In practice, rsc can achieve up to
+$11.6\times$ speedup for a single sparse operation and a $1.6\times$ end-to-end
+wall-clock time speedup with negligible accuracy drop.},
+ arxiv_url = {https://arxiv.org/pdf/2210.10737v2.pdf},
+ author = {Zirui Liu and Shengyuan Chen and Kaixiong Zhou and Daochen Zha and Xiao Huang and Xia Hu},
+ title = {RSC: Accelerate Graph Neural Networks Training via Randomized Sparse Computations},
+ year = {2022}
+}
+
+@article{mustafa-2023-are,
+ abstract = {While the expressive power and computational capabilities of graph neural
+networks (GNNs) have been theoretically studied, their optimization and
+learning dynamics, in general, remain largely unexplored. Our study undertakes
+the Graph Attention Network (GAT), a popular GNN architecture in which a node's
+neighborhood aggregation is weighted by parameterized attention coefficients.
+We derive a conservation law of GAT gradient flow dynamics, which explains why
+a high portion of parameters in GATs with standard initialization struggle to
+change during training. This effect is amplified in deeper GATs, which perform
+significantly worse than their shallow counterparts. To alleviate this problem,
+we devise an initialization scheme that balances the GAT network. Our approach
+i) allows more effective propagation of gradients and in turn enables
+trainability of deeper networks, and ii) attains a considerable speedup in
+training and convergence time in comparison to the standard initialization. Our
+main theorem serves as a stepping stone to studying the learning dynamics of
+positive homogeneous models with attention mechanisms.},
+ arxiv_url = {https://arxiv.org/pdf/2310.07235v2.pdf},
+ author = {Nimrah Mustafa and Aleksandar Bojchevski and Rebekka Burkholz},
+ github_url = {https://github.com/Diego999/pyGAT},
+ title = {Are GATs Out of Balance?},
+ year = {2023}
+}
+
+@article{mustafa-2024-gate,
+ abstract = {Graph Attention Networks (GATs) are designed to provide flexible neighborhood
+aggregation that assigns weights to neighbors according to their importance. In
+practice, however, GATs are often unable to switch off task-irrelevant
+neighborhood aggregation, as we show experimentally and analytically. To
+address this challenge, we propose GATE, a GAT extension that holds three major
+advantages: i) It alleviates over-smoothing by addressing its root cause of
+unnecessary neighborhood aggregation. ii) Similarly to perceptrons, it benefits
+from higher depth as it can still utilize additional layers for (non-)linear
+feature transformations in case of (nearly) switched-off neighborhood
+aggregation. iii) By down-weighting connections to unrelated neighbors, it
+often outperforms GATs on real-world heterophilic datasets. To further validate
+our claims, we construct a synthetic test bed to analyze a model's ability to
+utilize the appropriate amount of neighborhood aggregation, which could be of
+independent interest.},
+ arxiv_url = {https://arxiv.org/pdf/2406.00418v2.pdf},
+ author = {Nimrah Mustafa and Rebekka Burkholz},
+ title = {GATE: How to Keep Out Intrusive Neighbors},
+ year = {2024}
+}
+
+@article{tailor-2020-degree,
+ abstract = {Graph neural networks (GNNs) have demonstrated strong performance on a wide
+variety of tasks due to their ability to model non-uniform structured data.
+Despite their promise, there exists little research exploring methods to make
+them more efficient at inference time. In this work, we explore the viability
+of training quantized GNNs, enabling the usage of low precision integer
+arithmetic during inference. We identify the sources of error that uniquely
+arise when attempting to quantize GNNs, and propose an architecturally-agnostic
+method, Degree-Quant, to improve performance over existing quantization-aware
+training baselines commonly used on other architectures, such as CNNs. We
+validate our method on six datasets and show, unlike previous attempts, that
+models generalize to unseen graphs. Models trained with Degree-Quant for INT8
+quantization perform as well as FP32 models in most cases; for INT4 models, we
+obtain up to 26% gains over the baselines. Our work enables up to 4.7x speedups
+on CPU when using INT8 arithmetic.},
+ arxiv_url = {https://arxiv.org/pdf/2008.05000v3.pdf},
+ author = {Shyam A. Tailor and Javier Fernandez-Marques and Nicholas D. Lane},
+ github_url = {https://github.com/camlsys/degree-quant},
+ title = {Degree-Quant: Quantization-Aware Training for Graph Neural Networks},
+ year = {2020}
+}
+
+@article{xue-2023-lazygnn,
+ abstract = {Recent works have demonstrated the benefits of capturing long-distance
+dependency in graphs by deeper graph neural networks (GNNs). But deeper GNNs
+suffer from the long-lasting scalability challenge due to the neighborhood
+explosion problem in large-scale graphs. In this work, we propose to capture
+long-distance dependency in graphs by shallower models instead of deeper
+models, which leads to a much more efficient model, LazyGNN, for graph
+representation learning. Moreover, we demonstrate that LazyGNN is compatible
+with existing scalable approaches (such as sampling methods) for further
+accelerations through the development of mini-batch LazyGNN. Comprehensive
+experiments demonstrate its superior prediction performance and scalability on
+large-scale benchmarks. The implementation of LazyGNN is available at
+https://github.com/RXPHD/Lazy_GNN.},
+ arxiv_url = {https://arxiv.org/pdf/2302.01503v2.pdf},
+ author = {Rui Xue and Haoyu Han and MohamadAli Torkamani and Jian Pei and Xiaorui Liu},
+ title = {LazyGNN: Large-Scale Graph Neural Networks via Lazy Propagation},
+ year = {2023}
+}
+
+@article{zandieh-2023-kdeformer,
+ abstract = {Dot-product attention mechanism plays a crucial role in modern deep
+architectures (e.g., Transformer) for sequence modeling, however, na\"ive exact
+computation of this model incurs quadratic time and memory complexities in
+sequence length, hindering the training of long-sequence models. Critical
+bottlenecks are due to the computation of partition functions in the
+denominator of softmax function as well as the multiplication of the softmax
+matrix with the matrix of values. Our key observation is that the former can be
+reduced to a variant of the kernel density estimation (KDE) problem, and an
+efficient KDE solver can be further utilized to accelerate the latter via
+subsampling-based fast matrix products. Our proposed KDEformer can approximate
+the attention in sub-quadratic time with provable spectral norm bounds, while
+all prior results merely provide entry-wise error bounds. Empirically, we
+verify that KDEformer outperforms other attention approximations in terms of
+accuracy, memory, and runtime on various pre-trained models. On BigGAN image
+generation, we achieve better generative scores than the exact computation with
+over $4\times$ speedup. For ImageNet classification with T2T-ViT, KDEformer
+shows over $18\times$ speedup while the accuracy drop is less than $0.5\%$.},
+ arxiv_url = {https://arxiv.org/pdf/2302.02451v2.pdf},
+ author = {Amir Zandieh and Insu Han and Majid Daliri and Amin Karbasi},
+ github_url = {https://github.com/yitu-opensource/T2T-ViT},
+ title = {KDEformer: Accelerating Transformers via Kernel Density Estimation},
+ year = {2023}
+}
+
+@article{zeng-2019-graphsaint,
+ abstract = {Graph Convolutional Networks (GCNs) are powerful models for learning
+representations of attributed graphs. To scale GCNs to large graphs,
+state-of-the-art methods use various layer sampling techniques to alleviate the
+"neighbor explosion" problem during minibatch training. We propose GraphSAINT,
+a graph sampling based inductive learning method that improves training
+efficiency and accuracy in a fundamentally different way. By changing
+perspective, GraphSAINT constructs minibatches by sampling the training graph,
+rather than the nodes or edges across GCN layers. Each iteration, a complete
+GCN is built from the properly sampled subgraph. Thus, we ensure fixed number
+of well-connected nodes in all layers. We further propose normalization
+technique to eliminate bias, and sampling algorithms for variance reduction.
+Importantly, we can decouple the sampling from the forward and backward
+propagation, and extend GraphSAINT with many architecture variants (e.g., graph
+attention, jumping connection). GraphSAINT demonstrates superior performance in
+both accuracy and training time on five large graphs, and achieves new
+state-of-the-art F1 scores for PPI (0.995) and Reddit (0.970).},
+ arxiv_url = {https://arxiv.org/pdf/1907.04931v4.pdf},
+ author = {Hanqing Zeng and Hongkuan Zhou and Ajitesh Srivastava and Rajgopal Kannan and Viktor Prasanna},
+ github_url = {https://github.com/GraphSAINT/GraphSAINT},
+ title = {GraphSAINT: Graph Sampling Based Inductive Learning Method},
+ year = {2019}
+}
+
+@article{zhu-2023-aggregation,
+ abstract = {As graph data size increases, the vast latency and memory consumption during
+inference pose a significant challenge to the real-world deployment of Graph
+Neural Networks (GNNs). While quantization is a powerful approach to reducing
+GNNs complexity, most previous works on GNNs quantization fail to exploit the
+unique characteristics of GNNs, suffering from severe accuracy degradation.
+Through an in-depth analysis of the topology of GNNs, we observe that the
+topology of the graph leads to significant differences between nodes, and most
+of the nodes in a graph appear to have a small aggregation value. Motivated by
+this, in this paper, we propose the Aggregation-Aware mixed-precision
+Quantization ($\rm A^2Q$) for GNNs, where an appropriate bitwidth is
+automatically learned and assigned to each node in the graph. To mitigate the
+vanishing gradient problem caused by sparse connections between nodes, we
+propose a Local Gradient method to serve the quantization error of the node
+features as the supervision during training. We also develop a Nearest Neighbor
+Strategy to deal with the generalization on unseen graphs. Extensive
+experiments on eight public node-level and graph-level datasets demonstrate the
+generality and robustness of our proposed method. Compared to the FP32 models,
+our method can achieve up to a 18.6x (i.e., 1.70bit) compression ratio with
+negligible accuracy degradation. Morever, compared to the state-of-the-art
+quantization method, our method can achieve up to 11.4\% and 9.5\% accuracy
+improvements on the node-level and graph-level tasks, respectively, and up to
+2x speedup on a dedicated hardware accelerator.},
+ arxiv_url = {https://arxiv.org/pdf/2302.00193v1.pdf},
+ author = {Zeyu Zhu and Fanrong Li and Zitao Mo and Qinghao Hu and Gang Li and Zejian Liu and Xiaoyao Liang and Jian Cheng},
+ title = {$\rm A^2Q$: Aggregation-Aware Quantization for Graph Neural Networks},
+ year = {2023}
+}
+
+% ===========================================
+% REFERENCE CANDIDATES
+% Additional reference papers for context
+% ===========================================
+
+@article{bojchevski-2020-scaling,
+ abstract = {Graph neural networks (GNNs) have emerged as a powerful approach for solving
+many network mining tasks. However, learning on large graphs remains a
+challenge - many recently proposed scalable GNN approaches rely on an expensive
+message-passing procedure to propagate information through the graph. We
+present the PPRGo model which utilizes an efficient approximation of
+information diffusion in GNNs resulting in significant speed gains while
+maintaining state-of-the-art prediction performance. In addition to being
+faster, PPRGo is inherently scalable, and can be trivially parallelized for
+large datasets like those found in industry settings. We demonstrate that PPRGo
+outperforms baselines in both distributed and single-machine training
+environments on a number of commonly used academic graphs. To better analyze
+the scalability of large-scale graph learning methods, we introduce a novel
+benchmark graph with 12.4 million nodes, 173 million edges, and 2.8 million
+node features. We show that training PPRGo from scratch and predicting labels
+for all nodes in this graph takes under 2 minutes on a single machine, far
+outpacing other baselines on the same graph. We discuss the practical
+application of PPRGo to solve large-scale node classification problems at
+Google.},
+ arxiv_url = {https://arxiv.org/pdf/2007.01570v2.pdf},
+ author = {Aleksandar Bojchevski and Johannes Gasteiger and Bryan Perozzi and Amol Kapoor and Martin Blais and Benedek Rózemberczki and Michal Lukasik and Stephan Günnemann},
+ doi = {10.1145/3394486.3403296},
+ title = {Scaling graph neural networks with approximate pagerank.},
+ year = {2020}
+}
+
+@article{chai-2022-distributed,
+ abstract = {Despite the recent success of Graph Neural Networks, it remains challenging
+to train a GNN on large graphs with millions of nodes and billions of edges,
+which are prevalent in many graph-based applications. Traditional
+sampling-based methods accelerate GNN training by dropping edges and nodes,
+which impairs the graph integrity and model performance. Differently,
+distributed GNN algorithms accelerate GNN training by utilizing multiple
+computing devices and can be classified into two types: "partition-based"
+methods enjoy low communication costs but suffer from information loss due to
+dropped edges, while "propagation-based" methods avoid information loss but
+suffer from prohibitive communication overhead caused by the neighbor
+explosion. To jointly address these problems, this paper proposes DIGEST
+(DIstributed Graph reprEsentation SynchronizaTion), a novel distributed GNN
+training framework that synergizes the complementary strength of both
+categories of existing methods. We propose to allow each device to utilize the
+stale representations of its neighbors in other subgraphs during subgraph
+parallel training. This way, our method preserves global graph information from
+neighbors to avoid information loss and reduce communication costs. Our
+convergence analysis demonstrates that DIGEST enjoys a state-of-the-art
+convergence rate. Extensive experimental evaluation on large, real-world graph
+datasets shows that DIGEST achieves up to 21.82 speedups without compromising
+performance compared to state-of-the-art distributed GNN training frameworks.},
+ arxiv_url = {https://arxiv.org/pdf/2206.00057v2.pdf},
+ author = {Zheng Chai and Guangji Bai and Liang Zhao and Yue Cheng},
+ title = {Distributed graph neural network training with periodic historical embedding synchronization.},
+ year = {2022}
+}
+
+@article{chen-2017-stochastic,
+ abstract = {Graph convolutional networks (GCNs) are powerful deep neural networks for
+graph-structured data. However, GCN computes the representation of a node
+recursively from its neighbors, making the receptive field size grow
+exponentially with the number of layers. Previous attempts on reducing the
+receptive field size by subsampling neighbors do not have a convergence
+guarantee, and their receptive field size per node is still in the order of
+hundreds. In this paper, we develop control variate based algorithms which
+allow sampling an arbitrarily small neighbor size. Furthermore, we prove new
+theoretical guarantee for our algorithms to converge to a local optimum of GCN.
+Empirical results show that our algorithms enjoy a similar convergence with the
+exact algorithm using only two neighbors per node. The runtime of our
+algorithms on a large Reddit dataset is only one seventh of previous neighbor
+sampling algorithms.},
+ arxiv_url = {https://arxiv.org/pdf/1710.10568v3.pdf},
+ author = {Jianfei Chen and Jun Zhu and Le Song},
+ title = {Stochastic training of graph convolutional networks with variance reduction.},
+ year = {2017}
+}
+
+@article{chen-2018-fastgcn,
+ abstract = {The graph convolutional networks (GCN) recently proposed by Kipf and Welling
+are an effective graph model for semi-supervised learning. This model, however,
+was originally designed to be learned with the presence of both training and
+test data. Moreover, the recursive neighborhood expansion across layers poses
+time and memory challenges for training with large, dense graphs. To relax the
+requirement of simultaneous availability of test data, we interpret graph
+convolutions as integral transforms of embedding functions under probability
+measures. Such an interpretation allows for the use of Monte Carlo approaches
+to consistently estimate the integrals, which in turn leads to a batched
+training scheme as we propose in this work---FastGCN. Enhanced with importance
+sampling, FastGCN not only is efficient for training but also generalizes well
+for inference. We show a comprehensive set of experiments to demonstrate its
+effectiveness compared with GCN and related models. In particular, training is
+orders of magnitude more efficient while predictions remain comparably
+accurate.},
+ arxiv_url = {https://arxiv.org/pdf/1801.10247v1.pdf},
+ author = {Jie Chen and Tengfei Ma and Cao Xiao},
+ title = {Fastgcn: fast learning with graph convolutional networks via importance sampling.},
+ year = {2018}
+}
+
+@article{chen-2020-simple,
+ abstract = {Graph convolutional networks (GCNs) are a powerful deep learning approach for
+graph-structured data. Recently, GCNs and subsequent variants have shown
+superior performance in various application areas on real-world datasets.
+Despite their success, most of the current GCN models are shallow, due to the
+{\em over-smoothing} problem. In this paper, we study the problem of designing
+and analyzing deep graph convolutional networks. We propose the GCNII, an
+extension of the vanilla GCN model with two simple yet effective techniques:
+{\em Initial residual} and {\em Identity mapping}. We provide theoretical and
+empirical evidence that the two techniques effectively relieves the problem of
+over-smoothing. Our experiments show that the deep GCNII model outperforms the
+state-of-the-art methods on various semi- and full-supervised tasks. Code is
+available at https://github.com/chennnM/GCNII .},
+ arxiv_url = {https://arxiv.org/pdf/2007.02133v1.pdf},
+ author = {Ming Chen and Zhewei Wei and Zengfeng Huang and Bolin Ding and Yaliang Li},
+ title = {Simple and deep graph convolutional networks.},
+ year = {2020}
+}
+
+@article{chiang-2019-cluster,
+ abstract = {Graph convolutional network (GCN) has been successfully applied to many
+graph-based applications; however, training a large-scale GCN remains
+challenging. Current SGD-based algorithms suffer from either a high
+computational cost that exponentially grows with number of GCN layers, or a
+large space requirement for keeping the entire graph and the embedding of each
+node in memory. In this paper, we propose Cluster-GCN, a novel GCN algorithm
+that is suitable for SGD-based training by exploiting the graph clustering
+structure. Cluster-GCN works as the following: at each step, it samples a block
+of nodes that associate with a dense subgraph identified by a graph clustering
+algorithm, and restricts the neighborhood search within this subgraph. This
+simple but effective strategy leads to significantly improved memory and
+computational efficiency while being able to achieve comparable test accuracy
+with previous algorithms. To test the scalability of our algorithm, we create a
+new Amazon2M data with 2 million nodes and 61 million edges which is more than
+5 times larger than the previous largest publicly available dataset (Reddit).
+For training a 3-layer GCN on this data, Cluster-GCN is faster than the
+previous state-of-the-art VR-GCN (1523 seconds vs 1961 seconds) and using much
+less memory (2.2GB vs 11.2GB). Furthermore, for training 4 layer GCN on this
+data, our algorithm can finish in around 36 minutes while all the existing GCN
+training algorithms fail to train due to the out-of-memory issue. Furthermore,
+Cluster-GCN allows us to train much deeper GCN without much time and memory
+overhead, which leads to improved prediction accuracy---using a 5-layer
+Cluster-GCN, we achieve state-of-the-art test F1 score 99.36 on the PPI
+dataset, while the previous best result was 98.71 by [16]. Our codes are
+publicly available at
+https://github.com/google-research/google-research/tree/master/cluster_gcn.},
+ arxiv_url = {https://arxiv.org/pdf/1905.07953v2.pdf},
+ author = {Wei-Lin Chiang and Xuanqing Liu and Si Si and Yang Li and Samy Bengio and Cho-Jui Hsieh},
+ doi = {10.1145/3292500.3330925},
+ title = {Cluster-gcn: An efficient algorithm for training deep and large graph convolutional networks.},
+ year = {2019}
+}
+
+@article{cong-2020-minimal,
+ abstract = {Sampling methods (e.g., node-wise, layer-wise, or subgraph) has become an
+indispensable strategy to speed up training large-scale Graph Neural Networks
+(GNNs). However, existing sampling methods are mostly based on the graph
+structural information and ignore the dynamicity of optimization, which leads
+to high variance in estimating the stochastic gradients. The high variance
+issue can be very pronounced in extremely large graphs, where it results in
+slow convergence and poor generalization. In this paper, we theoretically
+analyze the variance of sampling methods and show that, due to the composite
+structure of empirical risk, the variance of any sampling method can be
+decomposed into \textit{embedding approximation variance} in the forward stage
+and \textit{stochastic gradient variance} in the backward stage that
+necessities mitigating both types of variance to obtain faster convergence
+rate. We propose a decoupled variance reduction strategy that employs
+(approximate) gradient information to adaptively sample nodes with minimal
+variance, and explicitly reduces the variance introduced by embedding
+approximation. We show theoretically and empirically that the proposed method,
+even with smaller mini-batch sizes, enjoys a faster convergence rate and
+entails a better generalization compared to the existing methods.},
+ arxiv_url = {https://arxiv.org/pdf/2006.13866v2.pdf},
+ author = {Weilin Cong and Rana Forsati and Mahmut Kandemir and Mehrdad Mahdavi},
+ title = {Minimal variance sampling with provable guarantees for fast training of graph neural networks.},
+ year = {2020}
+}
+
+@article{ding-2021-gnn,
+ abstract = {Most state-of-the-art Graph Neural Networks (GNNs) can be defined as a form
+of graph convolution which can be realized by message passing between direct
+neighbors or beyond. To scale such GNNs to large graphs, various neighbor-,
+layer-, or subgraph-sampling techniques are proposed to alleviate the "neighbor
+explosion" problem by considering only a small subset of messages passed to the
+nodes in a mini-batch. However, sampling-based methods are difficult to apply
+to GNNs that utilize many-hops-away or global context each layer, show unstable
+performance for different tasks and datasets, and do not speed up model
+inference. We propose a principled and fundamentally different approach,
+VQ-GNN, a universal framework to scale up any convolution-based GNNs using
+Vector Quantization (VQ) without compromising the performance. In contrast to
+sampling-based techniques, our approach can effectively preserve all the
+messages passed to a mini-batch of nodes by learning and updating a small
+number of quantized reference vectors of global node representations, using VQ
+within each GNN layer. Our framework avoids the "neighbor explosion" problem of
+GNNs using quantized representations combined with a low-rank version of the
+graph convolution matrix. We show that such a compact low-rank version of the
+gigantic convolution matrix is sufficient both theoretically and
+experimentally. In company with VQ, we design a novel approximated message
+passing algorithm and a nontrivial back-propagation rule for our framework.
+Experiments on various types of GNN backbones demonstrate the scalability and
+competitive performance of our framework on large-graph node classification and
+link prediction benchmarks.},
+ arxiv_url = {https://arxiv.org/pdf/2110.14363v1.pdf},
+ author = {Mucong Ding and Kezhi Kong and Jingling Li and Chen Zhu and John P Dickerson and Furong Huang and Tom Goldstein},
+ title = {Vq-gnn: A universal framework to scale up graph neural networks using vector quantization.},
+ year = {2021}
+}
+
+@article{gasteiger-2018-predict,
+ abstract = {Neural message passing algorithms for semi-supervised classification on
+graphs have recently achieved great success. However, for classifying a node
+these methods only consider nodes that are a few propagation steps away and the
+size of this utilized neighborhood is hard to extend. In this paper, we use the
+relationship between graph convolutional networks (GCN) and PageRank to derive
+an improved propagation scheme based on personalized PageRank. We utilize this
+propagation procedure to construct a simple model, personalized propagation of
+neural predictions (PPNP), and its fast approximation, APPNP. Our model's
+training time is on par or faster and its number of parameters on par or lower
+than previous models. It leverages a large, adjustable neighborhood for
+classification and can be easily combined with any neural network. We show that
+this model outperforms several recently proposed methods for semi-supervised
+classification in the most thorough study done so far for GCN-like models. Our
+implementation is available online.},
+ arxiv_url = {https://arxiv.org/pdf/1810.05997v6.pdf},
+ author = {Johannes Gasteiger and Aleksandar Bojchevski and Stephan Günnemann},
+ journal = {International Conference on Learning Representations (ICLR), New
+  Orleans, LA, USA, 2019},
+ title = {Predict then propagate: Graph neural networks meet personalized pagerank.},
+ year = {2018}
+}
+
+@article{hamilton-2017-inductive,
+ abstract = {Low-dimensional embeddings of nodes in large graphs have proved extremely
+useful in a variety of prediction tasks, from content recommendation to
+identifying protein functions. However, most existing approaches require that
+all nodes in the graph are present during training of the embeddings; these
+previous approaches are inherently transductive and do not naturally generalize
+to unseen nodes. Here we present GraphSAGE, a general, inductive framework that
+leverages node feature information (e.g., text attributes) to efficiently
+generate node embeddings for previously unseen data. Instead of training
+individual embeddings for each node, we learn a function that generates
+embeddings by sampling and aggregating features from a node's local
+neighborhood. Our algorithm outperforms strong baselines on three inductive
+node-classification benchmarks: we classify the category of unseen nodes in
+evolving information graphs based on citation and Reddit post data, and we show
+that our algorithm generalizes to completely unseen graphs using a multi-graph
+dataset of protein-protein interactions.},
+ arxiv_url = {https://arxiv.org/pdf/1706.02216v4.pdf},
+ author = {William L. Hamilton and Rex Ying and Jure Leskovec},
+ title = {Inductive representation learning on large graphs.},
+ year = {2017}
+}
