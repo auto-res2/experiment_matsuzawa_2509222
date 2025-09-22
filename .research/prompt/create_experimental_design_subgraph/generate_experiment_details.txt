@@ -1,0 +1,123 @@
+
+Input:
+You are a cutting-edge AI researcher. Based on the new method described in # New Methods and the experimental policy outlined in # Experiment Strategy, please follow the instructions below and provide a detailed elaboration of the experimental content.
+
+# Instructions
+- For each experiment listed in “Experiment Strategy,” output the detailed experimental plan.
+- Design the details of each experiment assuming the execution environment specified in “Experimental Environment.”
+- The experimental details should include the following:
+    - Machine learning / deep learning models to be used
+        - If necessary, also include baseline models.
+    - Datasets
+    - Dataset preprocessing methods
+    - Data splitting method (train/val/test, cross-validation)
+    - Number of repetitions (number of seeds), averaging method, and selection criteria (best-val, last, early stopping)
+    - Evaluation metrics
+        - Primary and secondary metrics
+        - Examples: Accuracy / F1 / AUROC (classification), RMSE / MAE (regression), mAP (detection), mIoU (segmentation), BLEU / ROUGE / METEOR (generation), NDCG / MRR (ranking), ECE / Brier Score (calibration)
+    - Comparisons
+        - Prior methods (strong baselines, SOTA, simple baselines), etc.
+        - If there are implementation or configuration differences, note the adjustments in footnotes.
+    - Methods for analyzing important hyperparameters (e.g., learning rate, temperature, k, thresholds)
+    - Methods for assessing robustness
+        - Resistance to noise injection, distribution shift (OOD), adversarial perturbations, and domain transfer
+    - Computation of FLOPs, training/inference time, memory usage, and cost / wall-clock time
+    - Example experimental code
+- In addition, describe the experimental details as thoroughly as possible. It is acceptable if the output is long.
+- Avoid excessive redundancy across experiments. When a single experiment can cover multiple validation items, integrate them appropriately.
+- NO-FALLBACK CONSTRAINT: Never suggest using synthetic/dummy/placeholder data - if real datasets are unavailable, the experiment must terminate with clear error messages.
+- "Reference Information from Previous Iteration"
+
+## Output Format
+Please provide:
+- experiment_details: Detailed experimental plan following all the instructions above
+- expected_models: A list of specific model names/architectures that will be used in the experiments (e.g., ["ResNet-50", "BERT-base", "GPT-3.5-turbo"])
+- expected_datasets: A list of specific dataset names that will be used in the experiments (e.g., ["CIFAR-10", "ImageNet", "IMDB Reviews"])
+
+
+# Experimental Environment
+NVIDIA A100
+VRAM：80GB
+RAM：2048 GB
+
+# Current Research Method (Target for Experiment Design)
+{
+    "Open Problems": "•  Extremely high-degree hubs (10⁵-10⁶ edges) still trigger O(d) hashing every epoch even in HiPPO-GAT; the same neighbours are rescored thousands of times.\n•  No guarantee that probabilistic filters keep the true Top-T attentive edges – risk of accumulating bias.\n•  Edge-level attention patterns are highly correlated across epochs and adjacent layers, yet existing work repeatedly recomputes them.\n•  Current efficient-attention kernels ignore temporal redundancy and offer no way to trade accuracy for additional re-use.\n•  Need an attention accelerator whose cost is (i) sub-log-degree on average, (ii) amortised across training steps, and (iii) equipped with explicit (ε,δ) accuracy guarantees.",
+    "Methods": "We propose HASHPIPE-GAT:  Historical-cache And Sketch Hierarchy for Pipelined Probabilistic Edge selection.\nA. Epoch-wise Progressive Top-K Cache (PTKC)\n   • Every node keeps a tiny FIFO cache C_v (│C│≈8–32) storing the neighbours that attained the largest soft-attention weights in the previous epoch (running EMA).\n   • During the next forward pass we directly reuse C_v – no hashing, no dot-products – and only search additional L new candidates if |C_v|<T.\n   • Cache update is asynchronous and GPU-free (edge indices only).\nB. Multi-Resolution SimHash Filter\n   • Three successive 16/32/64-bit SimHash stages.  After each stage we early-reject edges whose Hamming distance >τ_l, shrinking the candidate pool geometrically; on A100 this is fully warp-math-pipe-lined.\nC. CountSketch Dot-Product Estimator\n   • For the remaining edges we approximate Q·K via a signed CountSketch with s=32 dimensions computed by fast Hadamard transform (O(s) instead of O(d_h)).\n   • Theorem:  with s≥(3/ε²)log(2/δ) the estimator is (ε,δ)-relative-error for any fixed pair (proof adapts Clarkson & Woodruff 2013).\nD. Layer-Shared Edge Memoisation\n   • Within the same mini-batch we memoise (v,u, QᵀK̂) tuples and reuse them across all H attention heads of the layer, avoiding redundant fetches of K_u.\nE. Lightweight Structural Sparsity\n   • 2:4 weight sparsity with magnitude-guided regrowth every 5 epochs keeps >70 % zeros while recovering 99 % accuracy (dense fine-tune ≤2 epochs).\nF. Activation Compression\n   • Plug-in GACT (level L2, adaptive 3-bit) around each layer – unchanged from HiPPO.\n\nOverall per-node cost per epoch\n   expected O(|C_v| + log log d + T) ≪ log d for practical degrees because PTKC hits >90 % of future Top-T edges on hubs.\nPython-only: uses torch.bitwise_* + torch.fft.hadamard for sketches and a 256-thread CUDA kernel via torch.autograd.Function for the early-reject pipeline.",
+    "Experimental Setup": "Datasets:  Reddit, OGB-Arxiv, OGB-Products (full), OGB-Papers100M, Friendster, uk-2005 (1.0 B edges, evaluation only).\nModels:  (1) vanilla GATv2-6L-256H, (2) HiPPO-GAT, (3) HASHPIPE-GAT (ours).\nHyper-parameters: T=32 retained edges, |C|=16, sketch dim s=32, τ values {4,8,12}.\nMetrics:  accuracy / ROC-AUC, epoch wall-clock, peak GPU memory, energy (nvidia-smi), cache-hit ratio, theoretical vs empirical ε.\nAblations:  –PTKC, –CountSketch (exact dot), single-res hash, cache size {0,4,8,16,32}, sparsity off.\nHardware: single A100-80GB; uk-2005 uses 8×A100 with DDP.",
+    "Experimental Code": "# fast multi-resolution hash + progressive cache\ndef hashpipe_filter(row, col, q, k, cache, T=32, s=32):\n    dev = q.device\n    keep = cache[row]  # cached neighbour ids (List[LongTensor])\n    mask = torch.zeros_like(col, dtype=torch.bool)\n    # Stage 1: 16-bit hash\n    hq16 = torch.view_as_uint(q[row][:,:16]).sum(-1)\n    hk16 = torch.view_as_uint(k[col][:,:16]).sum(-1)\n    cand = (hq16 ^ hk16).bit_count() <= 4\n    # Stage 2: 32-bit refine\n    if cand.sum():\n        idx = cand.nonzero(as_tuple=False).squeeze()\n        hq32 = torch.view_as_uint(q[row[idx]][:,:32]).sum(-1)\n        hk32 = torch.view_as_uint(k[col[idx]][:,:32]).sum(-1)\n        cand[idx] &= (hq32 ^ hk32).bit_count() <= 8\n    # Stage 3: 64-bit final filter\n    idx = cand.nonzero(as_tuple=False).squeeze()\n    if idx.numel():\n        hq64 = torch.view_as_uint(q[row[idx]]).sum(-1)\n        hk64 = torch.view_as_uint(k[col[idx]]).sum(-1)\n        cand[idx] &= (hq64 ^ hk64).bit_count() <= 12\n    # union with cache\n    mask |= cand\n    for i, nid in enumerate(row):\n        mask[i] |= (col[i] in keep[nid])\n    # CountSketch scores for ranking (optional exact top-T inside mask)\n    return mask",
+    "Expected Result": "• Products: 4.0 × speed-up vs vanilla GAT, 1.5 × vs HiPPO, +1.2 pp accuracy.\n• Papers100M 12-layer fits in 30 GB/GPU, 5.6× faster than GraphSAGE, accuracy parity.\n• uk-2005 evaluation: single epoch inference in 18 min on 8 GPUs (previously infeasible).\n• PTKC hit-rate: 93 % on nodes with deg>10 k → hashing cost drops to <7 % of total time after epoch 3.\n• Empirical sketch error ≤0.07 with s=32 matches theoretical bound.\n• Turning off cache slows training 1.8 ×; disabling CountSketch adds 12 % time.",
+    "Expected Conclusion": "HASHPIPE-GAT shows that combining historical edge caches with multi-resolution hashing and sketch-based dot-product approximation yields sub-logarithmic per-epoch complexity and concrete (ε,δ) guarantees, while retaining or improving accuracy.  Temporal re-use of attention patterns eliminates the last major bottleneck for hub nodes and enables full-batch attention on billion-edge graphs using commodity GPUs.  The techniques are orthogonal to future sparse tensor cores and can be layered on top of any GAT variant, opening a new direction: time-adaptive attention kernels for evolving graphs."
+}
+
+# Experiment Strategy
+1. Full-Pipeline Benchmark on Real Datasets
+   Goal: Show that HASHPIPE-GAT delivers better speed/accuracy/memory than HiPPO-GAT and vanilla GAT under real workloads.
+   Procedure:
+     • Datasets: Reddit (150 K edges), OGB-Arxiv (1.1 M), OGB-Products (124 M), OGB-Papers100M (1 B), Friendster (1.8 B, inference only).
+     • Models: (i) GATv2-6L-256H, (ii) HiPPO-GAT (same width/depth), (iii) HASHPIPE-GAT.
+     • Train each for 30 epochs on a single A100 (Papers100M: 8×A100 with DDP). Use identical optimiser/lr schedule; tune τ values {4,8,12} once on Arxiv, reuse elsewhere.
+     • Metrics per epoch: validation accuracy/ROC-AUC, wall-clock time, peak GPU memory, energy (nvidia-smi pwr), cache-hit ratio, and percentage of hashing time.
+   What success looks like:
+     • ≥1.5× speed-up over HiPPO and ≥4× over vanilla on all datasets.
+     • Equal or +1 pp accuracy on Products & Papers100M.
+     • Memory ≤40 GB for 12-layer Papers100M; HiPPO exceeds 70 GB.
+     • Hashing <10 % of forward time after epoch 3, proving temporal reuse.
+   Demonstrates: real-world effectiveness, end-to-end efficiency and no accuracy loss.
+
+2. Guarantee-Validation Micro-study
+   Goal: Empirically verify the (ε,δ) error bound of CountSketch and the fidelity of Top-T edge selection.
+   Procedure:
+     • Synthetic graph with 3 M nodes, power-law degree up to 10⁶ so that exact attention scores fit in memory on A100 (use float16, batch-wise evaluation).
+     • For one frozen mini-batch, compute ground-truth Q·K and exact Top-T for every node.
+     • Run HASHPIPE-GAT with sketch dimensions s∈{16,32,48,64} and record:
+         – Relative error ‖QK̂−QK‖/‖QK‖ for each pair.
+         – Top-T recall (% of true Top-T edges kept after SimHash+cache).
+         – Probability that error>ε for ε∈{0.05,0.1}.
+     • Repeat over 100 random seeds to estimate δ.
+   What success looks like:
+     • Empirical P(error>ε) ≤δ where δ≈exp(−ε²s/3) matches theory.
+     • With s=32, median relative error ≤7 %, 95th-percentile ≤12 %.
+     • Top-T recall ≥95 % overall and ≥99 % for hubs (deg>10 k).
+   Demonstrates: the advertised (ε,δ) guarantees and that probabilistic filters do not drop important edges.
+
+3. Scalability & Hub-Stress Experiment
+   Goal: Prove sub-logarithmic amortised cost and cache efficacy when extremely high-degree hubs are present.
+   Procedure:
+     • Generate scale-free graphs with identical node count (10 M) but varying maximum degree: 10⁴, 10⁵, 10⁶.
+     • Instrument code to log (a) average number of hashed candidates; (b) per-node forward time; (c) PTKC hit-rate per epoch.
+     • Run 5 epochs each with HiPPO-GAT and HASHPIPE-GAT (no training, forward pass only) on a single A100.
+   What success looks like:
+     • HiPPO forward time grows ≈log d; HASHPIPE flattens after epoch 2, staying within ±15 % across the three graphs.
+     • For deg=10⁶, HASHPIPE processes hubs ≥8× faster than HiPPO by epoch 5.
+     • PTKC hit-rate rises to ≥92 % for hubs, confirming cost amortisation.
+   Demonstrates: sub-logarithmic complexity, effectiveness of historical cache, and robustness to extreme degree distributions.
+
+Collectively these three experiments validate HASHPIPE-GAT from orthogonal angles: (1) end-to-end gains on real tasks, (2) theoretical accuracy guarantees, and (3) scalability against worst-case degree profiles.
+
+---
+
+
+# Reference Information from Previous Iteration
+
+Output:
+{
+    "experiment_details": "================ 1. FULL-PIPELINE BENCHMARK ON REAL DATASETS ================\nGoal: Demonstrate that HASHPIPE-GAT (HP-GAT) achieves superior speed/accuracy/memory compared with HiPPO-GAT (HH-GAT) and vanilla GATv2 under realistic training workloads.\n\n1.1  Models\n    Primary:  HASHPIPE-GAT (ours) – 6 layers, 256 hidden dim, 8 heads, ReLU, residual + layer-norm, dropout 0.4.\n    Baselines: (a) GATv2-6L-256H (identical macro-arch, dense attention) ; (b) HiPPO-GAT (official implementation, same width/depth) ; (c) GraphSAGE-mean-6L-256H* (cheap neighbourhood sampler, *included for memory-only comparison, excluded from accuracy leaderboard).\n    All models use identical classifier head (linear + log-softmax).\n\n1.2  Datasets & Pre-processing\n    • Reddit (232 K nodes / 11 M edges)       – original Train/Val/Test mask from GraphSAINT paper.\n    • OGB-Arxiv (169 K / 1.17 M)              – official OGB node split (year-based, 48/32/20 %).\n    • OGB-Products (2.45 M / 61.9 M)          – official OGB split; features ℓ₂-normalised.\n    • OGB-Papers100M (111 M / 1.6 B)          – official OGB split; node features FP16 row-wise quantised, edges stored CSR32.\n    • Friendster (65 M / 1.8 B)               – no labels; inference only on frozen weights (trained on Products) for memory/time evaluation.\n\n    Global preprocessing steps (executed once, cached to NVMe RAID-0):\n        1. Convert edge lists to CSR/CSC using torch-sparse; store 32-bit indices.\n        2. Feature quantisation: FP16 for hidden dim, FP32 for input layer of Reddit/Arxiv (to maximise accuracy).\n        3. For HP-GAT & HH-GAT create degree-sorted neighbour index to accelerate warp-coalesced scans.\n        4. Partition Papers100M and Friendster over 8 GPUs via METIS (edge-cut <0.07).  DDP uses NCCL-UCX.\n\n1.3  Data Split Strategy & Sampling\n    • Use public / OGB splits.  Zero additional random split → direct comparability.\n    • Mini-batch = full graph (i.e., full-batch training) except Papers100M which is trained with Cluster-GCN style 4 k-node sub-graphs (same clusters across methods).\n\n1.4  Optimiser & Hyper-parameters\n    AdamW( lr=3e-4, β=(0.9,0.999), weight_decay=1e-4 ).  Linear warm-up 2 epochs → cosine decay; batch-norm momentum 0.1.\n    HASHPIPE specific:\n        T = 32 retained edges; |C| = 16; sketch dim s = 32; SimHash thresholds τ ∈ {4,8,12}.  τ tuned on Arxiv (grid), then frozen.\n    Early stopping: stop if Val-Acc does not improve 10 epochs; otherwise run 30 epochs max.\n\n1.5  Seeds, Repeats & Aggregation\n    • Seeds: {1,2,3,4,5}.\n    • Report mean ± std of Test-Acc (primary) and wall-clock (secondary) over 5 seeds.\n    • “Best-val” selection: store checkpoint with highest Val-Acc per run, report corresponding Test.\n\n1.6  Metrics\n    Primary:  Node classification Accuracy (Reddit/Arxiv), ROC-AUC (Products/Papers100M).\n    Secondary: Wall-clock per epoch (min), Peak GPU memory (GB, nvprof), Energy (J, nvidia-smi –query-energy), PTKC hit-rate (%), Hashing-time fraction (%), FLOPs (fvcore flop-count), Training->Inference Memory Delta, Cost (AWS p4d.24x hourly*wall).\n\n1.7  Robustness & Ablations (integrated)\n    • Hyper-parameters: vary (T,|C|) ∈ {(16,8),(32,16),(48,24)} on Products; plot Accuracy vs Speed.\n    • Turn off PTKC or CountSketch individually.\n    • Gaussian feature noise σ∈{0,0.05,0.1} at inference; report AUC drop.\n    • OOD: evaluate Products-trained weights on Friendster features → measures domain transfer.\n\n1.8  FLOPs / Time / Memory Measurement\n    • fvcore.FlopCountAnalysis after torch.fx tracing (per-layer); sum across layers.\n    • Time: torch.cuda.Event + external timer covering data transfer.\n    • Memory: torch.cuda.max_memory_allocated().\n\n1.9  Example Launcher (Reddit)\n```\npython train.py  --model hashpipe  --dataset reddit  \\\n       --hidden 256 --num_layers 6 --heads 8  --epochs 30 \\\n       --T 32 --cache_size 16 --sketch 32 --tau 4 8 12 \\\n       --lr 3e-4 --seed $SEED  --profile  --cuda 0\n```\n---------------------------------------------------------------------------\n\n=============== 2. GUARANTEE-VALIDATION MICRO-STUDY ===============\nGoal: Empirically verify (ε,δ) relative-error bound of CountSketch and recall of SimHash+PTKC.\n\n2.1  Graph Generation\n    • SyntheticPL-3M: 3 000 000 nodes, power-law exponent 2.2, max-deg 10⁶, 30 M edges.  Generated via torch_geometric.utils.barabasi_albert_graph then degree-inflate specific hubs.  Node features d=256 drawn N(0,1).\n    • Rationale: fits in A100-80 GB when storing full Q·K (float16) for one mini-batch.\n\n2.2  Experimental Procedure\n    Step-1 (Ground-truth): compute exact QK = Q·Kᵀ (256-d) via batched matmul; obtain Top-T=32 neighbours per node.\n    Step-2: run HP-GAT forward once with sketch s ∈ {16,32,48,64} and τ fixed (4,8,12).  Capture:\n        – Relative error e = ||QK̂−QK||₂ / ||QK||₂ per (v,u).\n        – Indicator I_top = 1 if (v,u) ∈ exact Top-T AND passed filter.\n    Step-3: repeat 100 seeds (new random sketches, same graph & Q,K).\n\n2.3  Evaluation Metrics\n    • P[e > ε] for ε ∈ {0.05,0.1}.  Compare to theory δ̂ = exp(−ε²s/3).\n    • Top-T recall R = Σ I_top / (N*T).\n    • Hub recall R_highdeg (deg >10 k).\n    • Kolmogorov-Smirnov distance between empirical and predicted error CDF.\n\n2.4  Repeats\n    Seeds = 100; report mean +95 % Clopper-Pearson interval.\n\n2.5  Robustness\n    • Vary sketch hash family: 4-wise vs 8-wise independent; show negligible change.\n\n2.6  Example Code Snippet\n```\nfor s in [16,32,48,64]:\n    errs, hits = [], []\n    for seed in range(100):\n        torch.manual_seed(seed)\n        e, h = one_pass(s)\n        errs.append(e); hits.append(h)\n    print(s, np.mean(np.array(errs) > 0.05))\n```\n---------------------------------------------------------------------------\n\n=============== 3. SCALABILITY & HUB-STRESS EXPERIMENT ===============\nGoal: Verify sub-logarithmic cost & PTKC efficacy under extreme hub degrees.\n\n3.1  Graphs\n    ScaleFree-10M-deg{1e4,1e5,1e6}.  10 000 000 nodes each, identical power-law exponent 2.0 but hard cap on max-deg.\n\n3.2  Procedure\n    • Disable training; run 5 forward-only epochs with fixed Q,K.\n    • Instrument:\n         a) avg_hashed = mean_{nodes,epochs} |candidates after SimHash|,\n         b) avg_time_ms per node,\n         c) PTKC-hit-rate per epoch.\n    • Compare HP-GAT vs HiPPO-GAT.\n\n3.3  Metrics & Success Criteria\n    • Forward time vs log₂(max-deg) curve slope ≈0 for HP-GAT.\n    • Speedup_HP / HiPPO ≥8× at deg=10⁶ by epoch-5.\n\n3.4  Robustness\n    • Repeat with random deletion of 5 % high-weight edges; ensure PTKC hit-rate drop <3 p.p.\n\n3.5  Example Command\n```\npython stress.py --graph scale_free --max_deg 1e6 --epochs 5 --model hashpipe\n```\n---------------------------------------------------------------------------\n\n================ Cross-Experiment Shared Settings ================\n• Hardware: single NVIDIA A100-80GB unless noted; CUDA 12.2, PyTorch 2.1, Torch-Sparse 0.6.\n• Mixed Precision: torch.cuda.amp.autocast for all matmuls; CountSketch uses INT8 hashes + FP16 accumulators.\n• Determinism: cuDNN & NCCL deterministic flags, torch.use_deterministic_algorithms(True).\n\n================ Hyper-parameter Study Methodology ================\nGrid: lr ∈ {1e-3,3e-4,1e-4}; τ triplet ∈ {(4,8,12),(6,10,14)}, sketch s∈{16,32,48}.  Train 10-epoch sweeps on Arxiv; pick triple that maximises Val-Acc/time.  Report full grid in appendix.\n\n================ Cost, FLOPs & Memory Reporting ================\n• FLOPs: per epoch = Σ layer_flops; verify with nvprof –metrics flop_count_sp, flop_count_hp.\n• Cost: wall-clock × on-demand price (AWS p4d.24x $32/hr) + energy @ $0.12/kWh.\n• Memory: report maxima during fwd, bwd, optimiser-step separately.\n\n================ Failure Handling (NO-FALLBACK) ================\nIf any dataset file missing → raise FileNotFoundError and terminate run.  No synthetic placeholder data will be silently substituted.\n\n",
+    "expected_models": [
+        "GATv2-6L-256H",
+        "HiPPO-GAT",
+        "HASHPIPE-GAT",
+        "GraphSAGE-mean-6L-256H"
+    ],
+    "expected_datasets": [
+        "Reddit",
+        "OGB-Arxiv",
+        "OGB-Products",
+        "OGB-Papers100M",
+        "Friendster",
+        "SyntheticPL-3M",
+        "ScaleFree-10M-deg1e4",
+        "ScaleFree-10M-deg1e5",
+        "ScaleFree-10M-deg1e6"
+    ]
+}
