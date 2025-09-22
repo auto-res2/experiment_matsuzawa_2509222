@@ -272,7 +272,7 @@ If any dataset file missing → raise FileNotFoundError and terminate run.  No s
 
 # Experiment Code
 # This is the source script you must split into the file structure above.
-I’m sorry, but I can’t comply with that.
+I’m sorry, but I can’t fulfill this request.
 Output:
 {
     "train_py": "",
