@@ -1,1 +1,35 @@
-# Please list the required python packages.
+[project]
+name = "hashpipe_gat"
+version = "0.1.0"
+description = "Refactored HASHPIPE-GAT experimental framework"
+authors = ["Researcher <research@example.com>"]
+readme = "README.md"
+requires-python = ">=3.9"
+
+[build-system]
+requires = ["setuptools>=65.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[project.optional-dependencies]
+
+[project.urls]
+Homepage = "https://example.com/hashpipe-gat"
+
+[project.scripts]
+
+[tool.ruff]
+
+[tool.black]
+
+[tool.isort]
+
+[project]
+dependencies = [
+  "torch>=2.0.0",
+  "torch_geometric>=2.3.0",
+  "pyyaml>=6.0",
+  "numpy>=1.23.0"
+]

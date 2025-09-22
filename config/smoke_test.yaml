@@ -1,0 +1,13 @@
+experiment_name: smoke_test
+model: hashpipe
+dataset: Reddit
+hidden: 64
+num_layers: 2
+heads: 4
+T: 8
+cache_size: 4
+sketch: 16
+tau: [4, 8, 12]
+lr: 0.001
+epochs: 1
+verbose: true

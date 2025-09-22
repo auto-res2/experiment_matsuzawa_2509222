@@ -1,0 +1,13 @@
+experiment_name: full_experiment
+model: hashpipe
+dataset: Reddit
+hidden: 256
+num_layers: 6
+heads: 8
+T: 32
+cache_size: 16
+sketch: 32
+tau: [4, 8, 12]
+lr: 0.0003
+epochs: 30
+verbose: false
