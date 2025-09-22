@@ -1,0 +1,17 @@
+
+Input:
+# Task
+You carefully read the contents of the “Paper Outline” and select one GitHub link from the “GitHub URLs List” that you think is most relevant to the contents.
+# Constraints
+- Output the index number corresponding to the selected GitHub URL.
+- Be sure to select only one GitHub URL.
+- If there is no related GitHub link, output None.
+# Paper Outline
+KDEformer's methodology involves reducing the computation of the attention's partition function and the softmax matrix multiplication to a generalized Kernel Density Estimation (KDE) problem. It uses an efficient KDE solver to approximate the diagonal scaling matrix (D) and generate a sampling matrix (Π) via importance sampling for Approximate Matrix Multiplication (AMM). The core `WExpKDE` primitive, which estimates weighted exponential kernel densities, is translated into an instance of the Gaussian KDE problem using appropriate transformations. For practical acceleration, Locality Sensitive Hashing (LSH) is employed to identify and subtract 'heavy' elements from the attention matrix, thereby reducing its stable rank and the required number of samples. A GPU-friendly LSH with equal-sized buckets is proposed to minimize spillover and improve parallelization.
+
+# GitHub URLs List
+['https://github.com/huggingface/pytorch-pretrained-BigGAN', 'https://github.com/yitu-opensource/T2T-ViT', 'https://github.com/huggingface/pytorch-pretrained-BigGAN']
+Output:
+{
+    "index": 1
+}
