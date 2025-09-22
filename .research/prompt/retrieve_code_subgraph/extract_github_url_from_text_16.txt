@@ -1,0 +1,17 @@
+
+Input:
+# Task
+You carefully read the contents of the “Paper Outline” and select one GitHub link from the “GitHub URLs List” that you think is most relevant to the contents.
+# Constraints
+- Output the index number corresponding to the selected GitHub URL.
+- Be sure to select only one GitHub URL.
+- If there is no related GitHub link, output None.
+# Paper Outline
+The core methodology involves formulating the sampling variance optimization as an adversary bandit problem. Rewards are defined as the negative derivative of the effective variance, which considers node embeddings and learned weights that vary during training. Two bandit algorithms are proposed: 1. **GNN-BS**: Utilizes the adversary Multi-Armed Bandit (MAB) setting where a single neighbor (arm) is chosen repeatedly 'k' times. The sampling distribution `q_t` is updated using the EXP3 algorithm based on collected rewards `r_ij(t) = -∇q_ij(t)V_e(q_t_i)`. 2. **GNN-BS.M**: Employs the adversary MAB with multiple plays setting, using an efficient `k`-combination sampler (DepRound) to select a 'k'-element subset of neighbors at once. The sampling distribution `q_t` is updated using EXP3.M, with rewards defined as `r_ij(t) = α_ij / q_ij(t)^2 * ||h_j(t)||^2` for `j` in the sampled subset. For attentive GNNs, adjusted feedback attention values `α'_ij` are introduced to approximate true attention values from sampled unnormalized attentions. Both algorithms aim to maintain nonparametric estimates of the sampler and update it iteratively.
+
+# GitHub URLs List
+['https://github.com/matenure/FastGCN', 'https://github.com/huangwb/AS-GCN', 'https://github.com/xavierzw/ogb-geniepath-bs']
+Output:
+{
+    "index": 2
+}
