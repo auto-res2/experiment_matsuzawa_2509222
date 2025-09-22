@@ -563,6 +563,68 @@
       "title": "Leveraging Proxy of Training Data for Test-Time Adaptation"
     }
   ],
+  "reference_research_study_list": [
+    {
+      "title": "Ttaps: Test-time adaption by aligning prototypes using self-supervision"
+    },
+    {
+      "title": "Mt3: Meta test-time training for self-supervised test-time adaption"
+    },
+    {
+      "title": "Parameter-free online test-time adaptation"
+    },
+    {
+      "title": "A probabilistic framework for lifelong test-time adaptation"
+    },
+    {
+      "title": "Adaptformer: Adapting vision transformers for scalable visual recognition"
+    },
+    {
+      "title": "Stfar: Improving object detection robustness at test-time by self-training with feature alignment regularization"
+    },
+    {
+      "title": "Unbiased mean teacher for cross-domain object detection"
+    },
+    {
+      "title": "Vision meets robotics: The kitti dataset"
+    },
+    {
+      "title": "Physics-based rendering for improving robustness to rain"
+    },
+    {
+      "title": "Deep residual learning for image recognition"
+    },
+    {
+      "title": "Benchmarking neural network robustness to common corruptions and perturbations"
+    },
+    {
+      "title": "Mecta: Memory-economic continual test-time model adaptation"
+    },
+    {
+      "title": "Lora: Low-rank adaptation of large language models"
+    },
+    {
+      "title": "Batch normalization: Accelerating deep network training by reducing internal covariate shift"
+    },
+    {
+      "title": "Test-time classifier adjustment module for modelagnostic domain generalization"
+    },
+    {
+      "title": "Test-time adaptation via self-training with nearest neighbor information"
+    },
+    {
+      "title": "Cafa: Class-aware feature alignment for test-time adaptation"
+    },
+    {
+      "title": "A robust learning approach to domain adaptive object detection"
+    },
+    {
+      "title": "Self-training and adversarial background regularization for unsupervised domain adaptive one-stage object detection"
+    },
+    {
+      "title": "A free lunch for unsupervised domain adaptive object detection without source data"
+    }
+  ],
   "new_method": {
     "method": "{\n    \"Open Problems\": \"• Even forward-only TTA such as FLASHADAPT or OSHA still demand a *second* pass per test batch to collect statistics, so relative adaptation speed C(g)≈2.  Under 30 fps video streams on edge devices this already halves throughput.  \\n• Pipelining one-pass adaptation is non-trivial because the deltas must be predicted *before* the current sample has run through the network.  \\n• Hyper-net rules trained on synthetic corruptions drift when real shifts differ; explicit uncertainty estimates are missing.  \\n• Current low-rank weight injections ignore attention/QKV matrices used by modern ViT/ConvNeXt blocks.  \\n• No existing TTA work jointly optimises for (i) zero extra forward, (ii) transformer support, (iii) a provable upper-bound on accuracy loss when the hyper-net abstains.\",\n    \"Methods\": \"We propose SWIFTADAPT – Zero-extra-forward, transformer-ready Test-Time Adaptation.\\n1. Look-Ahead Statistics (LAS):\\n   Maintain an online exponential moving average \\\\bar s_b of (μ,σ²,e) per block using the *already available* activations of the current forward.  The hyper-net consumes \\\\bar s^{t−1} to predict deltas Δ^{t} *before* image t enters the network – eliminating the dry run.\\n2. Dual-Path Hyper-Net g_ϕ:\\n   a) CNN branch (for conv blocks) identical to FLASHADAPT.\\n   b) Tiny 2-layer Transformer branch operating on query/key/value norm triples to handle QKV matrices.  Branches share the last linear head yielding rank-1 factors (u,v).\\n3. Uncertainty-Aware Conjugate Loss:\\n   During meta-training we attach a variance head σ̂ to g_ϕ and minimise  𝓛=ℒ_CPL+β KL(N(Δ*,τI)||N(Δ̂,diag σ̂²))  .  At test time, blocks with predictive std>τ_skip are left unchanged – providing *provable* bound ΔAcc ≤ ε(τ_skip).\\n4. On-Device Episodic Fine-Tuning:\\n   Every K=128 frames, 4-step Adam on the ϕ parameters whose gradients have highest Fisher score, capped to 0.5 ms budget.\\n5. Memory-less Rank-1++ Injection:\\n   For ViT QKV we inject   W←W+u vᵀ  with u,v ∈ℝ^{d}.  For conv we reshape u to (C_out,1,1).\\n6. Hardware Pipeline:\\n   The LAS update and Δ prediction run on ARM cores while the GPU/NPU executes the main forward, realising perfect overlap.\",\n    \"Experimental Setup\": \"Datasets / Models: ImageNet-C/R/A (ResNet-50, ConvNeXt-T, ViT-B/16), CIFAR-10/100-C (WRN-28-10), Streaming ImageNet-Vid 30 fps, DomainNet.\\nProtocols: Online streams at η∈{1,1/2,1/4} (Timme’23) plus ultra-real-time 60 fps on Jetson Orin NX.\\nBaselines: Source, TTN, TENT, CoTTA, OSHA, FLASHADAPT.\\nMetrics: Top-1 error, relative adaptation speed C(g), energy (NV-prof), RAM, accuracy vs τ_skip, ablation on LAS decay α, rank-1 vs rank-2, transformer branch off.\",\n    \"Experimental Code\": \"# core LAS + pipelined adapt\\nclass SwiftAdapt:\\n    def __init__(self, model):\\n        self.model=model.eval(); self.blocks=list(model_blocks(model))\\n        self.state={i:torch.zeros(3,device='cuda') for i in range(len(self.blocks))}\\n        self.hyper=DualHyper(len(self.blocks)).cuda()\\n        self.alpha=0.1  # LAS decay\\n    @torch.no_grad()\\n    def predict(self,x):\\n        # 1. produce deltas from *previous* running stats\\n        deltas=[self.hyper(self.state[i],i) for i in range(len(self.blocks))]\\n        apply_all(self.blocks,deltas)\\n        y=self.model(x)                      # single forward\\n        restore_all(self.blocks)            # remove deltas\\n        # 2. update LAS with current activations (hooks)\\n        for i,b in enumerate(self.blocks):\\n            a=act_cache[b]                  # collected by forward hook\\n            mu=a.mean(); var=a.var(False); en=(a**2).mean()\\n            self.state[i]= (1-self.alpha)*self.state[i]+self.alpha*torch.tensor([mu,var,en])\\n        return y\",\n    \"Expected Result\": \"• Relative speed C(g)=1.05 (overhead 5 %) – vs 2.0 FLASHADAPT, 6–12 TENT/CoTTA.  \\n• ImageNet-C avg error: 46.2 % (ResNet-50) vs 46.5 FLASHADAPT, 48.7 TENT.  \\n• ViT-B/16 gains −17 % error over source, matching FLASHADAPT while doubling FPS.  \\n• Under 60 fps stream on Orin NX keeps 92 % of offline accuracy; FLASHADAPT drops to 80 %, CoTTA 63 %.  \\n• Energy per frame −40 % vs source+CoTTA, memory +0.4 MB.  \\n• Theoretical bound verified: skipping high-σ̂ blocks reduces compute a further 12 % with <0.3 pp accuracy loss.\",\n    \"Expected Conclusion\": \"SWIFTADAPT shows that full one-pass TTA is possible by exploiting look-ahead statistics and pipelined hyper-net predictions.  Combined with uncertainty-aware conjugate objectives and support for transformer attention, it achieves state-of-the-art robustness at true real-time speeds on edge hardware, closing the last practical gap for deploying TTA in mobile and embedded vision systems.\"\n}",
     "experimental_design": {
