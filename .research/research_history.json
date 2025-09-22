@@ -574,6 +574,68 @@
       }
     }
   ],
+  "reference_research_study_list": [
+    {
+      "title": "Learning dexterous in-hand manipulation"
+    },
+    {
+      "title": "Accelerating neural architecture search using performance prediction"
+    },
+    {
+      "title": "Large scale gan training for high ﬁdelity natural image synthesis"
+    },
+    {
+      "title": "Openai gym"
+    },
+    {
+      "title": "Ai-gas: Ai-generating algorithms, an alternate paradigm for producing general artiﬁcial intelligence"
+    },
+    {
+      "title": "Improved regularization of convolutional neural networks with cutout"
+    },
+    {
+      "title": "Adversarial reprogramming of neural networks"
+    },
+    {
+      "title": "Efﬁcient multi-objective neural architecture search via lamarckian evolution"
+    },
+    {
+      "title": "Learning to teach"
+    },
+    {
+      "title": "Meta-learning and universality: Deep representations and gradient descent can approximate any learning algorithm"
+    },
+    {
+      "title": "Model-agnostic meta-learning for fast adaptation of deep networks"
+    },
+    {
+      "title": "Review papers: The statistical basis of meta-analysis"
+    },
+    {
+      "title": "Generative adversarial nets"
+    },
+    {
+      "title": "Automated curriculum learning for neural networks"
+    },
+    {
+      "title": "Algorithm 799: revolve: an implementation of check-pointing for the reverse or adjoint mode of computational differentiation"
+    },
+    {
+      "title": "Delving deep into rectiﬁers: Surpassing human-level performance on imagenet classiﬁcation"
+    },
+    {
+      "title": "Distilling the knowledge in a neural network"
+    },
+    {
+      "title": "Evolved policy gradients"
+    },
+    {
+      "title": "Batch normalization: Accelerating deep network training by reducing internal covariate shift"
+    },
+    {
+      "title": "Adam: A method for stochastic optimization"
+    }
+  ],
   "new_method": {
     "method": "{\n    \"Open Problems\": \"•  Extremely high-degree hubs (10⁵-10⁶ edges) still trigger O(d) hashing every epoch even in HiPPO-GAT; the same neighbours are rescored thousands of times.\\n•  No guarantee that probabilistic filters keep the true Top-T attentive edges – risk of accumulating bias.\\n•  Edge-level attention patterns are highly correlated across epochs and adjacent layers, yet existing work repeatedly recomputes them.\\n•  Current efficient-attention kernels ignore temporal redundancy and offer no way to trade accuracy for additional re-use.\\n•  Need an attention accelerator whose cost is (i) sub-log-degree on average, (ii) amortised across training steps, and (iii) equipped with explicit (ε,δ) accuracy guarantees.\",\n    \"Methods\": \"We propose HASHPIPE-GAT:  Historical-cache And Sketch Hierarchy for Pipelined Probabilistic Edge selection.\\nA. Epoch-wise Progressive Top-K Cache (PTKC)\\n   • Every node keeps a tiny FIFO cache C_v (│C│≈8–32) storing the neighbours that attained the largest soft-attention weights in the previous epoch (running EMA).\\n   • During the next forward pass we directly reuse C_v – no hashing, no dot-products – and only search additional L new candidates if |C_v|<T.\\n   • Cache update is asynchronous and GPU-free (edge indices only).\\nB. Multi-Resolution SimHash Filter\\n   • Three successive 16/32/64-bit SimHash stages.  After each stage we early-reject edges whose Hamming distance >τ_l, shrinking the candidate pool geometrically; on A100 this is fully warp-math-pipe-lined.\\nC. CountSketch Dot-Product Estimator\\n   • For the remaining edges we approximate Q·K via a signed CountSketch with s=32 dimensions computed by fast Hadamard transform (O(s) instead of O(d_h)).\\n   • Theorem:  with s≥(3/ε²)log(2/δ) the estimator is (ε,δ)-relative-error for any fixed pair (proof adapts Clarkson & Woodruff 2013).\\nD. Layer-Shared Edge Memoisation\\n   • Within the same mini-batch we memoise (v,u, QᵀK̂) tuples and reuse them across all H attention heads of the layer, avoiding redundant fetches of K_u.\\nE. Lightweight Structural Sparsity\\n   • 2:4 weight sparsity with magnitude-guided regrowth every 5 epochs keeps >70 % zeros while recovering 99 % accuracy (dense fine-tune ≤2 epochs).\\nF. Activation Compression\\n   • Plug-in GACT (level L2, adaptive 3-bit) around each layer – unchanged from HiPPO.\\n\\nOverall per-node cost per epoch\\n   expected O(|C_v| + log log d + T) ≪ log d for practical degrees because PTKC hits >90 % of future Top-T edges on hubs.\\nPython-only: uses torch.bitwise_* + torch.fft.hadamard for sketches and a 256-thread CUDA kernel via torch.autograd.Function for the early-reject pipeline.\",\n    \"Experimental Setup\": \"Datasets:  Reddit, OGB-Arxiv, OGB-Products (full), OGB-Papers100M, Friendster, uk-2005 (1.0 B edges, evaluation only).\\nModels:  (1) vanilla GATv2-6L-256H, (2) HiPPO-GAT, (3) HASHPIPE-GAT (ours).\\nHyper-parameters: T=32 retained edges, |C|=16, sketch dim s=32, τ values {4,8,12}.\\nMetrics:  accuracy / ROC-AUC, epoch wall-clock, peak GPU memory, energy (nvidia-smi), cache-hit ratio, theoretical vs empirical ε.\\nAblations:  –PTKC, –CountSketch (exact dot), single-res hash, cache size {0,4,8,16,32}, sparsity off.\\nHardware: single A100-80GB; uk-2005 uses 8×A100 with DDP.\",\n    \"Experimental Code\": \"# fast multi-resolution hash + progressive cache\\ndef hashpipe_filter(row, col, q, k, cache, T=32, s=32):\\n    dev = q.device\\n    keep = cache[row]  # cached neighbour ids (List[LongTensor])\\n    mask = torch.zeros_like(col, dtype=torch.bool)\\n    # Stage 1: 16-bit hash\\n    hq16 = torch.view_as_uint(q[row][:,:16]).sum(-1)\\n    hk16 = torch.view_as_uint(k[col][:,:16]).sum(-1)\\n    cand = (hq16 ^ hk16).bit_count() <= 4\\n    # Stage 2: 32-bit refine\\n    if cand.sum():\\n        idx = cand.nonzero(as_tuple=False).squeeze()\\n        hq32 = torch.view_as_uint(q[row[idx]][:,:32]).sum(-1)\\n        hk32 = torch.view_as_uint(k[col[idx]][:,:32]).sum(-1)\\n        cand[idx] &= (hq32 ^ hk32).bit_count() <= 8\\n    # Stage 3: 64-bit final filter\\n    idx = cand.nonzero(as_tuple=False).squeeze()\\n    if idx.numel():\\n        hq64 = torch.view_as_uint(q[row[idx]]).sum(-1)\\n        hk64 = torch.view_as_uint(k[col[idx]]).sum(-1)\\n        cand[idx] &= (hq64 ^ hk64).bit_count() <= 12\\n    # union with cache\\n    mask |= cand\\n    for i, nid in enumerate(row):\\n        mask[i] |= (col[i] in keep[nid])\\n    # CountSketch scores for ranking (optional exact top-T inside mask)\\n    return mask\",\n    \"Expected Result\": \"• Products: 4.0 × speed-up vs vanilla GAT, 1.5 × vs HiPPO, +1.2 pp accuracy.\\n• Papers100M 12-layer fits in 30 GB/GPU, 5.6× faster than GraphSAGE, accuracy parity.\\n• uk-2005 evaluation: single epoch inference in 18 min on 8 GPUs (previously infeasible).\\n• PTKC hit-rate: 93 % on nodes with deg>10 k → hashing cost drops to <7 % of total time after epoch 3.\\n• Empirical sketch error ≤0.07 with s=32 matches theoretical bound.\\n• Turning off cache slows training 1.8 ×; disabling CountSketch adds 12 % time.\",\n    \"Expected Conclusion\": \"HASHPIPE-GAT shows that combining historical edge caches with multi-resolution hashing and sketch-based dot-product approximation yields sub-logarithmic per-epoch complexity and concrete (ε,δ) guarantees, while retaining or improving accuracy.  Temporal re-use of attention patterns eliminates the last major bottleneck for hub nodes and enables full-batch attention on billion-edge graphs using commodity GPUs.  The techniques are orthogonal to future sparse tensor cores and can be layered on top of any GAT variant, opening a new direction: time-adaptive attention kernels for evolving graphs.\"\n}",
     "experimental_design": {
