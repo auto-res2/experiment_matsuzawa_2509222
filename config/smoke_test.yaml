@@ -1,0 +1,27 @@
+datasets:
+  imagenet_c:
+    hf_id: ang9867/ImageNet-C
+    split: test
+    take: 1000
+  cifar10_c:
+    hf_id: robro/cifar10-c-parquet
+    split: train
+    take: 1000
+  cifar100_c:
+    hf_id: randall-lab/cifar100-c
+    split: test
+    take: 1000
+  imagenet_vid:
+    hf_id: guanxiongsun/imagenetvid
+    split: validation
+    take: 600
+models:
+  - timm/resnet50.a1_in1k
+batch_size: 32
+las_decay: 0.1
+tau_skip: 0.0
+smoke: true
+fine_tune:
+  interval: 512
+  steps: 0
+severity_levels: [1]
