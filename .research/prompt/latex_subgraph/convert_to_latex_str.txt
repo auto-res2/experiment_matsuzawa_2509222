@@ -1,0 +1,183 @@
+
+Input:
+
+You are a LaTeX expert.
+Your task is to convert each section of a research paper into plain LaTeX **content only**, without including any section titles or metadata.
+
+Below are the paper sections. For each one, convert only the **content** into LaTeX:
+
+---
+Section: title
+
+Adaptive Pre-conditioned Test-Time Adaptation under Tight Memory Budgets
+
+---
+
+---
+Section: abstract
+
+Test-time adaptation (TTA) keeps a deployed model reliable when the test distribution drifts, yet real-time constraints leave little head-room for heavy optimisation. State-of-the-art second-order methods such as PROTA pre-condition a single gradient step with a fixed, low-rank Kronecker-factored curvature estimate. While effective, they waste memory on easy layers, starve hard ones and overlook curvature drift that silently breaks adaptation. We introduce Adaptive Pre-conditioned Test-Time Adaptation (APTA), a unified framework that (i) refines and selectively enlarges per-layer Kronecker factors on-line via a streaming Oja update, (ii) replaces KFAC by a zero-storage circulant Fisher inverse for depthwise convolution, LayerNorm and MLP blocks, (iii) selects a closed-form curvature-aware step size inside an analytic trust region, (iv) guards updates with a dual entropy-and-Mahalanobis safety gate, and (v) tracks label shift through a confidence-weighted bias Kalman filter. APTA re-uses the normal backward pass and adds at most four extra matrix–vector products per new eigenvector, limiting compute to 1.15× and memory to 1.8× the frozen network. Across ImageNet-C, 3DCC, Tiny-ImageNet-C, ImageNet-A, CIFAR100-C and ESC-50-Noise, APTA cuts top-1 error by 1–6 percentage points relative to PROTA and Tent while preventing the catastrophic collapses observed with entropy-only gating. Gains hold for ResNet-50, ConvNeXt-Tiny, ViT-B/16 and an Audio Spectrogram Transformer, demonstrating modality generality, and ablations confirm the importance of adaptive rank, circulant inversion and the dual safety gate.
+
+---
+
+---
+Section: introduction
+
+Real-world data seldom matches the distribution used to train a deep model. Illumination changes, sensors age and user behaviour evolves; without on-the-fly adaptation, accuracy deteriorates and safety-critical applications such as autonomous driving or mobile health may fail. Test-time adaptation (TTA) addresses this issue by updating the model using only the incoming unlabeled stream, without access to source data and under strict latency budgets \cite{alfarra-2023-evaluation,wang-2020-tent}.
+
+Why is TTA difficult? (1) First-order techniques that adjust batch-normalisation statistics or minimise prediction entropy ignore cross-channel couplings; they struggle when the shift induces strong correlations as with 3D viewpoint corruptions in ImageNet-3DCC \cite{kar-2022-common}. (2) Second-order pre-conditioning alleviates this, but existing methods store a fixed low-rank curvature that becomes inaccurate when dominant Hessian directions rotate, wasting memory on some layers while starving others. (3) Modern encoders rely on depthwise convolution, LayerNorm and linear MLP blocks whose curvature structure escapes classical KFAC. (4) Safety heuristics usually monitor only prediction entropy; they fail to detect curvature drift and may trigger silent divergence \cite{niu-2023-towards}.
+
+We propose Adaptive Pre-conditioned Test-Time Adaptation (APTA), a method that adapts the curvature itself, not just the parameters, to yield robust, safe and efficient TTA.
+
+Contributions
+• Streaming Adaptive Rank KFAC learns the Hessian eigenspaces online with Oja’s rule and allocates extra rank only where the residual spectrum warrants it, keeping global memory below 1.8× model size.
+• A hybrid circulant Fisher inverse handles depthwise convolution, LayerNorm and MLP blocks in O(C log C) time with zero additional storage, extending second-order TTA to ConvNeXt, ViT and audio transformers.
+• An analytic per-layer trust region computes a closed-form step size that respects a quadratic loss model, eliminating learning-rate tuning.
+• A dual safety gate skips updates that are either too confident (low entropy) or too far in the Fisher metric (large Mahalanobis distance), detecting curvature drift earlier than entropy-only tests.
+• A confidence-corrected Kalman bias head compensates label shift with a negligible (<0.1 MB) footprint.
+
+Verification. We evaluate APTA on six datasets and four architectures, reporting accuracy, latency, energy, memory and calibration. APTA consistently reduces error by 1–6 pp compared with PROTA, Tent, CoTTA, OSTA and POEM while adding only 15 % extra computation. Ablations isolate the effect of each component. Future work may blend APTA’s curvature cues with active label querying \cite{gui-2024-active} or diffusion-based input adaptation \cite{gao-2022-back}.
+
+---
+
+---
+Section: related_work
+
+Self-supervised and entropy-based TTA. Early approaches update the network by solving auxiliary tasks such as rotation prediction \cite{gidaris-2018-unsupervised} or self-supervised consistency losses \cite{sun-2019-test}. Tent introduces entropy minimisation on batch-normalisation affine parameters, achieving significant ImageNet-C gains at negligible cost \cite{wang-2020-tent}. However, with small batches or imbalanced streams its reliance on running statistics leads to instability \cite{gong-2022-note}. SAR and DELTA attempt to stabilise entropy minimisation through sharpness-aware gradients or batch renormalisation, but they remain first-order and cannot exploit curvature information \cite{niu-2023-towards,zhao-2023-delta}.
+
+Second-order TTA. PROTA pioneers low-rank Kronecker-factored natural-gradient steps within 1.1× inference time, yet fixes rank to four per layer and assumes stationary eigenspaces \cite{boudiaf-2022-parameter}. OSTA adds online shrinkage but still maintains a uniform rank and supports only vision models. APTA departs by refining eigenvectors online, growing rank on demand and introducing a circulant Fisher inverse that extends second-order adaptation to depthwise convolution and transformer blocks.
+
+Broader robustness efforts. EcoTTA uses lightweight meta-networks to reduce activation storage but remains first-order \cite{song-2023-ecotta}; CFA aligns class-conditional features in ViT but relies on per-class statistics that break under label shift \cite{kojima-2022-robustifying}. POEM monitors entropy distributions with betting martingales and triggers adaptation or rollback \cite{bar-2024-protected}; APTA instead blocks harmful updates pre-emptively through a Fisher-based Mahalanobis test. Active TTA collects a handful of labels to guide adaptation \cite{gui-2024-active}, a complementary direction to APTA’s unsupervised setting.
+
+---
+
+---
+Section: background
+
+Problem setting. A pre-trained network with parameters θ₀, optimised on a source distribution S, is deployed on an unending unlabeled target stream x₁, x₂, … drawn from a drift-prone distribution T. After predicting on xₜ, the system may update parameters via θₜ = θₜ₋₁ − αₜ Pₜ gₜ, where gₜ is the gradient of an unsupervised loss ℓ(xₜ; θₜ₋₁) and Pₜ approximates the inverse Fisher information. The objective is to minimise cumulative prediction error while honouring per-sample latency and memory budgets defined by the online evaluation protocol of \cite{alfarra-2023-evaluation}.
+
+Second-order pre-conditioning. Natural gradients premultiply g by F⁻¹, but storing and inverting the full Fisher is infeasible. Kronecker-factored approximations (KFAC) assume layer-wise independence so that F ≈ A ⊗ B. Represented through a rank-r eigen-decomposition V Λ Vᵀ, inverse-vector products cost O(r C²), where C is the channel count. Fixed-rank KFAC presumes stationary eigenspaces; when curvature drifts it wastes capacity on some layers and starves others.
+
+Architectural challenges. Depthwise convolution, LayerNorm and linear MLP blocks dominate ConvNeXt, ViT and audio transformers, but violate the two-factor assumption. Falling back to a diagonal pre-conditioner forfeits most second-order benefits—a gap that APTA closes with a circulant Fisher approximation.
+
+Safety limitations. Most TTA methods monitor only prediction entropy H(p). Yet gradients can explode while logits remain confident, leading to silent divergence. A Fisher-based Mahalanobis distance d² = gᵀ F⁻¹ g captures curvature drift and underpins APTA’s dual safety gate.
+
+---
+
+---
+Section: method
+
+APTA performs a single forward-backward pass per test batch and augments it with five lightweight modules.
+
+1. Streaming Adaptive Rank KFAC. Each adaptable layer starts with four Kronecker eigenvectors. For the first T = 200 samples the basis is refined online using Oja’s rule: V ← V + η ((g gᵀ) V − V Λ), followed by QR orthonormalisation. The residual tail energy E_tail = tr(F) − Σ_i≤r Λ_i is then estimated; if E_tail > ϵ, one additional eigenvector is extracted via power iteration on the residual Fisher. Rank growth stops once Σ_l r_l C_l reaches 1.8 |θ|, bounding memory.
+
+2. Hybrid circulant Fisher. For depthwise or linear layers of shape (C, ⋅) the Fisher is well approximated by a block-circulant matrix whose eigenbasis is the discrete Fourier matrix. Inverse-vector products therefore reduce to element-wise division in the frequency domain. Complexity is O(C log C) with zero parameter storage.
+
+3. Curvature-aware trust region. Around θ the unsupervised loss is modelled quadratically as q(α) = gᵀ P g + α² gᵀ F̂ P g. Choosing α = min(1, Δ / √(gᵀ P g)) guarantees the step stays within radius Δ under this model and eliminates layer-wise learning-rate tuning.
+
+4. Dual safety gate. Before updating, prediction entropy H(pₜ) and Mahalanobis distance d² are computed. The update is applied only if H(pₜ) > τ and d² ≤ κ; otherwise it is skipped while statistics continue to accumulate. The gate blocks both low-confidence and curvature-drift anomalies.
+
+5. Confidence-corrected bias head. To mitigate label shift, an exponential moving average of logits updates the classifier bias via a one-dimensional Kalman filter, adding less than 0.1 MB.
+
+Compute and memory. Per batch the extra work is at most four GEMV operations when a rank grows, one FFT per circulant layer, one scalar for the trust-region step and two safety-gate tests. On all tested architectures this yields 1.13–1.18× the baseline backward FLOPs.
+
+---
+
+---
+Section: experimental_setup
+
+Protocol. We follow the online benchmark of \cite{alfarra-2023-evaluation}: the data stream arrives at a constant frame rate and adaptation time counts against throughput.
+
+Datasets and models. Experiment 1 (curvature drift) uses ImageNet-C v1.1 (15 corruptions × 5 severities) streamed sequentially from severity 1→5 and ImageNet-3DCC (50 k rendered frames with continuous yaw/pitch) on ResNet-50-BN. Experiment 2 (cross-architecture) runs Tiny-ImageNet-C, ImageNet-A and ESC-50-Noise on ConvNeXt-Tiny, ViT-B/16 and an Audio Spectrogram Transformer respectively. Experiment 3 (safety) inserts 50 oversaturated “trap” frames into the ImageNet-C fog stream.
+
+Baselines. Source-frozen, Tent-1 and Tent-5 \cite{wang-2020-tent}, PROTA \cite{boudiaf-2022-parameter}, OSTA, CoTTA, and POEM \cite{bar-2024-protected}. All repositories are run in fp32 on a single RTX-3090. Batch sizes are 32 (CNNs), 16 (ViT) and 8 (audio).
+
+Hyper-parameters. For APTA we fix η = 5 × 10⁻³, ϵ = 0.05, Δ = 1.0, τ = 1.0 nats and κ = 350. These were selected on the first 5 k Gaussian-noise frames of ImageNet-C severity-2 and then frozen. Baseline parameters follow their original papers.
+
+Metrics. Primary: stream-average top-1 error (vision) or accuracy (audio). Secondary: effective rank, extra memory (MB), latency (ms / image), energy (J / frame), percentage of skipped updates and expected calibration error. Robustness: worst-case ImageNet-V2 error after adaptation and cosine similarity between source and adapted eigenvectors. All numbers are averaged over three deterministic seeds {2023, 2027, 2031}.
+
+---
+
+---
+Section: results
+
+Experiment 1 – curvature drift. On ImageNet-C severity-5, APTA attains 37.1 ± 0.1 % error, outperforming PROTA 38.9 ± 0.2 % and Tent-5 38.4 ± 0.3 %. Throughput is 221 FPS versus PROTA’s 228 FPS (3 % slower) and memory rises from 570 MB to 610 MB, well inside the 1.8× limit. Effective rank grows to 7.2 in the final ResNet block, confirming adaptive allocation. On the continuous ImageNet-3DCC stream APTA lowers the first-500-frame error by 4 pp relative to PROTA; eigenvector cosine similarity drops from 0.93 to 0.71, indicating curvature rotation that PROTA cannot track. The dual gate skips 2.4 % of updates.
+
+Experiment 2 – cross-architecture and modality. ConvNeXt-Tiny on Tiny-ImageNet-C severity-5: APTA 46.3 % error versus 49.4 % for fixed-rank KFAC and 52.1 % for Tent-1. Disabling the circulant switch degrades APTA by 1.8 pp and adds 18 % latency. ViT-B/16 on ImageNet-A: APTA 54.7 % error, Tent 57.9 %; OSTA diverges for two seeds. Audio Spectrogram Transformer on ESC-50-Noise: APTA reaches 70.2 % accuracy, +5 pp over the frozen source and +6 pp over OSTA. Across all models compute overhead C(g) remains 1.13–1.18; extra memory never exceeds 8 MB for ConvNeXt.
+
+Ablations. Fixing the rank (+1.4 pp error), disabling Oja updates (+1.1 pp), removing the dual gate (two catastrophic events in Experiment 3) or replacing the trust-region step with a scalar learning rate (+0.6 pp) all hurt performance, confirming each component’s value.
+
+Experiment 3 – safety gate. Entropy-only gating (κ = ∞) suffers three catastrophic divergences; PROTA’s entropy gate sees five. APTA records none and shows a 1.2 % false-skip rate. The Mahalanobis distance distribution is heavy-tailed for the inserted trap frames, justifying the κ threshold.
+
+Limitations. APTA still requires backward-pass access; fully black-box deployments would need gradient extraction. The rank-growth heuristic may overshoot under extreme shifts and could benefit from hardware-aware damping.
+
+---
+
+---
+Section: conclusion
+
+APTA advances test-time adaptation by learning the curvature, not just the parameters. Streaming Oja updates, demand-driven rank growth and efficient circulant inverses deliver consistent gains across convolutional, transformer and audio models while keeping compute within 1.15× and memory within 1.8× of standard inference. The dual entropy-and-Mahalanobis safety gate eradicates catastrophic failures that hamper existing methods, making APTA suitable for edge devices where both speed and reliability are paramount. Future work will couple APTA’s curvature signals with selective label querying, diffusion-based input correction and continual compression to push the memory budget below 1.5× while retaining safety and speed.
+
+---
+
+
+## LaTeX Formatting Rules:
+- Use \subsection{...} for any subsections within this section.
+    - Subsection titles should be distinct from the section name;
+    - Do not use '\subsection{  }', or other slight variations. Use more descriptive and unique titles.
+    - Avoid excessive subdivision. If a subsection is brief or overlaps significantly with another, consider merging them for clarity and flow.
+
+- For listing contributions, use the LaTeX \begin{itemize}...\end{itemize} format.
+    - Each item should start with a short title in \textbf{...} format.
+    - Avoid using -, *, or other Markdown bullet styles.
+
+- When including tables, use the `tabularx` environment with `\textwidth` as the target width.
+    - At least one column must use the `X` type to enable automatic width adjustment and line breaking.
+    - Include `\hline` at the top, after the header, and at the bottom. Avoid vertical lines unless necessary.
+    - To left-align content in `X` columns, define `
+ewcolumntype{Y}{>{
+aggedrightrraybackslash}X}` using the `array` package.
+
+- When writing pseudocode, use the `algorithm` and `algorithmicx` LaTeX environments.
+    - Only include pseudocode in the `Method` section. Pseudocode is not allowed in any other sections.
+    - Prefer the `\begin{algorithmic}` environment using **lowercase commands** such as `\State`, `\For`, and `\If`, to ensure compatibility and clean formatting.
+    - Pseudocode must represent actual algorithms or procedures with clear logic. Do not use pseudocode to simply rephrase narrative descriptions or repeat what has already been explained in text.
+        - Good Example:
+        ```latex
+        \State Compute transformed tokens: \(	ilde{T} \leftarrow W\,T\)
+        \State Update: \(T_{new} \leftarrow 	ilde{T} + \mu\,T_{prev}\)
+        ```
+- Figures and images are ONLY allowed in the "Results" section.
+    - Use LaTeX float option `[H]` to force placement.
+
+- All figures must be inserted using the following LaTeX format, using a `width` that reflects the filename:
+    ```latex
+    \includegraphics[width=\linewidth]{ images/filename.pdf }
+    ```
+    The `<appropriate-width>` must be selected based on the filename suffix:
+    - If the filename ends with _pair1.pdf or _pair2.pdf, use 0.48\linewidth as the width of each subfigure environment and place the figures side by side using `subcaption` package.
+    - Otherwise (default), use 0.7\linewidth
+
+- **Escaping special characters**:
+    - LaTeX special characters (`#`, `$`, `%`, `&`, `~`, `_`, `^`, `{`, `}`, `\`) must be escaped with a leading backslash when they appear in plain text (e.g., `data\_set`, `C\&C`).
+    - Underscores **must always be escaped** (`\_`) outside math mode, even in filenames (e.g., memory\_profiler), code-style words, itemize lists, or citation contexts.
+
+- Always use ASCII hyphens (`-`) instead of en-dashes (`–`) or em-dashes (`—`) to avoid spacing issues in hyphenated terms.
+- Do not include any of these higher-level commands such as \documentclass{...}, \begin{document}, and \end{document}.
+    - Additionally, avoid including section-specific commands such as \begin{abstract}, \section{  }, or any other similar environment definitions.
+- Do not modify citation placeholders:
+    - Citation placeholders appear in the format [citation_key], where citation_key contains underscores, numbers, and text (e.g., [vaswani_2017_attention], [smith_2023_deep]).
+    - You must preserve these placeholders EXACTLY as they appear in the input text.
+- If no LaTeX conversion is needed, output the content as-is without status messages like [Unchanged].
+Output:
+{
+    "title": "Adaptive Pre-conditioned Test-Time Adaptation under Tight Memory Budgets",
+    "abstract": "Test-time adaptation (TTA) keeps a deployed model reliable when the test distribution drifts, yet real-time constraints leave little head-room for heavy optimisation. State-of-the-art second-order methods such as PROTA pre-condition a single gradient step with a fixed, low-rank Kronecker-factored curvature estimate. While effective, they waste memory on easy layers, starve hard ones and overlook curvature drift that silently breaks adaptation. We introduce Adaptive Pre-conditioned Test-Time Adaptation (APTA), a unified framework that (i) refines and selectively enlarges per-layer Kronecker factors on-line via a streaming Oja update, (ii) replaces KFAC by a zero-storage circulant Fisher inverse for depthwise convolution, LayerNorm and MLP blocks, (iii) selects a closed-form curvature-aware step size inside an analytic trust region, (iv) guards updates with a dual entropy-and-Mahalanobis safety gate, and (v) tracks label shift through a confidence-weighted bias Kalman filter. APTA re-uses the normal backward pass and adds at most four extra matrix-vector products per new eigenvector, limiting compute to \\(1.15\\times\\) and memory to \\(1.8\\times\\) the frozen network. Across ImageNet-C, 3DCC, Tiny-ImageNet-C, ImageNet-A, CIFAR100-C and ESC-50-Noise, APTA cuts top-1 error by 1-6 percentage points relative to PROTA and Tent while preventing the catastrophic collapses observed with entropy-only gating. Gains hold for ResNet-50, ConvNeXt-Tiny, ViT-B/16 and an Audio Spectrogram Transformer, demonstrating modality generality, and ablations confirm the importance of adaptive rank, circulant inversion and the dual safety gate.",
+    "introduction": "Real-world data seldom matches the distribution used to train a deep model. Illumination changes, sensors age and user behaviour evolves; without on-the-fly adaptation, accuracy deteriorates and safety-critical applications such as autonomous driving or mobile health may fail. Test-time adaptation (TTA) addresses this issue by updating the model using only the incoming unlabeled stream, without access to source data and under strict latency budgets \\cite{alfarra-2023-evaluation,wang-2020-tent}.\n\nWhy is TTA difficult? (1) First-order techniques that adjust batch-normalisation statistics or minimise prediction entropy ignore cross-channel couplings; they struggle when the shift induces strong correlations as with 3D viewpoint corruptions in ImageNet-3DCC \\cite{kar-2022-common}. (2) Second-order pre-conditioning alleviates this, but existing methods store a fixed low-rank curvature that becomes inaccurate when dominant Hessian directions rotate, wasting memory on some layers while starving others. (3) Modern encoders rely on depthwise convolution, LayerNorm and linear MLP blocks whose curvature structure escapes classical KFAC. (4) Safety heuristics usually monitor only prediction entropy; they fail to detect curvature drift and may trigger silent divergence \\cite{niu-2023-towards}.\n\nWe propose Adaptive Pre-conditioned Test-Time Adaptation (APTA), a method that adapts the curvature itself, not just the parameters, to yield robust, safe and efficient TTA.\n\n\\subsection{Contributions}\n\\begin{itemize}\n  \\item \\textbf{Streaming adaptive rank KFAC:} Learns Hessian eigenspaces online with Oja's rule and allocates extra rank only where the residual spectrum warrants it, keeping global memory below \\(1.8\\times\\) model size.\n  \\item \\textbf{Hybrid circulant Fisher inverse:} Handles depthwise convolution, LayerNorm and MLP blocks in \\(\\mathcal{O}(C \\log C)\\) time with zero additional storage, extending second-order TTA to ConvNeXt, ViT and audio transformers.\n  \\item \\textbf{Analytic trust region:} Computes a closed-form step size that respects a quadratic loss model, eliminating learning-rate tuning.\n  \\item \\textbf{Dual safety gate:} Skips updates that are either too confident (low entropy) or too far in the Fisher metric (large Mahalanobis distance), detecting curvature drift earlier than entropy-only tests.\n  \\item \\textbf{Confidence-corrected Kalman bias:} Compensates label shift with a negligible (\\(< 0.1\\) MB) footprint.\n\\end{itemize}\n\nVerification. We evaluate APTA on six datasets and four architectures, reporting accuracy, latency, energy, memory and calibration. APTA consistently reduces error by 1-6 pp compared with PROTA, Tent, CoTTA, OSTA and POEM while adding only 15 \\% extra computation. Ablations isolate the effect of each component. Future work may blend APTA's curvature cues with active label querying \\cite{gui-2024-active} or diffusion-based input adaptation \\cite{gao-2022-back}.",
+    "related_work": "\\subsection{Self-supervised and entropy-based TTA}\nEarly approaches update the network by solving auxiliary tasks such as rotation prediction \\cite{gidaris-2018-unsupervised} or self-supervised consistency losses \\cite{sun-2019-test}. Tent introduces entropy minimisation on batch-normalisation affine parameters, achieving significant ImageNet-C gains at negligible cost \\cite{wang-2020-tent}. However, with small batches or imbalanced streams its reliance on running statistics leads to instability \\cite{gong-2022-note}. SAR and DELTA attempt to stabilise entropy minimisation through sharpness-aware gradients or batch renormalisation, but they remain first-order and cannot exploit curvature information \\cite{niu-2023-towards,zhao-2023-delta}.\n\n\\subsection{Second-order TTA}\nPROTA pioneers low-rank Kronecker-factored natural-gradient steps within \\(1.1\\times\\) inference time, yet fixes rank to four per layer and assumes stationary eigenspaces \\cite{boudiaf-2022-parameter}. OSTA adds online shrinkage but still maintains a uniform rank and supports only vision models. APTA departs by refining eigenvectors online, growing rank on demand and introducing a circulant Fisher inverse that extends second-order adaptation to depthwise convolution and transformer blocks.\n\n\\subsection{Broader robustness efforts}\nEcoTTA uses lightweight meta-networks to reduce activation storage but remains first-order \\cite{song-2023-ecotta}; CFA aligns class-conditional features in ViT but relies on per-class statistics that break under label shift \\cite{kojima-2022-robustifying}. POEM monitors entropy distributions with betting martingales and triggers adaptation or rollback \\cite{bar-2024-protected}; APTA instead blocks harmful updates pre-emptively through a Fisher-based Mahalanobis test. Active TTA collects a handful of labels to guide adaptation \\cite{gui-2024-active}, a complementary direction to APTA's unsupervised setting.",
+    "background": "\\subsection{Problem setting}\nA pre-trained network with parameters \\(\\theta_0\\), optimised on a source distribution \\(S\\), is deployed on an unending unlabeled target stream \\(x_1, x_2, \\dots\\) drawn from a drift-prone distribution \\(T\\). After predicting on \\(x_t\\), the system may update parameters via\n\\[\\theta_t = \\theta_{t-1} - \\alpha_t P_t g_t,\\]\nwhere \\(g_t\\) is the gradient of an unsupervised loss \\(\\ell(x_t; \\theta_{t-1})\\) and \\(P_t\\) approximates the inverse Fisher information. The objective is to minimise cumulative prediction error while honouring per-sample latency and memory budgets defined by the online evaluation protocol of \\cite{alfarra-2023-evaluation}.\n\n\\subsection{Second-order pre-conditioning}\nNatural gradients premultiply \\(g\\) by \\(F^{-1}\\), but storing and inverting the full Fisher is infeasible. Kronecker-factored approximations (KFAC) assume layer-wise independence so that \\(F \\approx A \\otimes B\\). Represented through a rank-\\(r\\) eigen-decomposition \\(V \\Lambda V^\\top\\), inverse-vector products cost \\(\\mathcal{O}(r C^2)\\), where \\(C\\) is the channel count. Fixed-rank KFAC presumes stationary eigenspaces; when curvature drifts it wastes capacity on some layers and starves others.\n\n\\subsection{Architectural challenges}\nDepthwise convolution, LayerNorm and linear MLP blocks dominate ConvNeXt, ViT and audio transformers, but violate the two-factor assumption. Falling back to a diagonal pre-conditioner forfeits most second-order benefits - a gap that APTA closes with a circulant Fisher approximation.\n\n\\subsection{Safety limitations}\nMost TTA methods monitor only prediction entropy \\(H(p)\\). Yet gradients can explode while logits remain confident, leading to silent divergence. A Fisher-based Mahalanobis distance \\(d^2 = g^\\top F^{-1} g\\) captures curvature drift and underpins APTA's dual safety gate.",
+    "method": "APTA performs a single forward-backward pass per test batch and augments it with five lightweight modules.\n\n\\subsection{Streaming adaptive rank KFAC}\nEach adaptable layer starts with four Kronecker eigenvectors. For the first \\(T = 200\\) samples the basis is refined online using Oja's rule:\n\\[V \\leftarrow V + \\eta\\,((g g^\\top) V - V \\Lambda),\\]\nfollowed by QR orthonormalisation. The residual tail energy \\(E_{\\text{tail}} = \\operatorname{tr}(F) - \\sum_{i\\le r} \\Lambda_i\\) is then estimated; if \\(E_{\\text{tail}} > \\epsilon\\), one additional eigenvector is extracted via power iteration on the residual Fisher. Rank growth stops once \\(\\sum_\\ell r_\\ell C_\\ell\\) reaches \\(1.8\\,\\lvert\\theta\\rvert\\), bounding memory.\n\n\\subsection{Hybrid circulant Fisher}\nFor depthwise or linear layers of shape \\((C, \\cdot)\\) the Fisher is well approximated by a block-circulant matrix whose eigenbasis is the discrete Fourier matrix. Inverse-vector products therefore reduce to element-wise division in the frequency domain. Complexity is \\(\\mathcal{O}(C \\log C)\\) with zero parameter storage.\n\n\\subsection{Curvature-aware trust region}\nAround \\(\\theta\\) the unsupervised loss is modelled quadratically as\n\\[q(\\alpha) = g^\\top P g + \\alpha^2 g^\\top \\hat{F}\\, P\\, g.\\]\nChoosing \\(\\alpha = \\min\\big(1, \\Delta / \\sqrt{g^\\top P g}\\big)\\) guarantees the step stays within radius \\(\\Delta\\) under this model and eliminates layer-wise learning-rate tuning.\n\n\\subsection{Dual safety gate}\nBefore updating, prediction entropy \\(H(p_t)\\) and Mahalanobis distance \\(d^2 = g^\\top P g\\) are computed. The update is applied only if \\(H(p_t) > \\tau\\) and \\(d^2 \\le \\kappa\\); otherwise it is skipped while statistics continue to accumulate. The gate blocks both low-confidence and curvature-drift anomalies.\n\n\\subsection{Confidence-corrected bias head}\nTo mitigate label shift, an exponential moving average of logits updates the classifier bias via a one-dimensional Kalman filter, adding less than 0.1 MB.\n\n\\subsection{Compute and memory}\nPer batch the extra work is at most four GEMV operations when a rank grows, one FFT per circulant layer, one scalar for the trust-region step and two safety-gate tests. On all tested architectures this yields \\(1.13\\text{-}1.18\\times\\) the baseline backward FLOPs.\n\n\\subsection{Overall adaptation algorithm}\n\\begin{algorithm}[H]\n\\caption{APTA test-time adaptation loop}\n\\begin{algorithmic}[1]\n\\State Initialise parameters \\(\\theta \\leftarrow \\theta_0\\); per-layer KFAC eigenpairs \\((V, \\Lambda)\\) with rank 4; Kalman bias state \\((m, s)\\); counters.\n\\For{each incoming batch \\(x_t\\)}\n  \\State Forward pass to obtain logits \\(z_t\\) and predictions \\(p_t\\); compute unsupervised loss \\(\\ell_t\\).\n  \\State Backward to obtain per-layer gradients \\(g_{t,\\ell}\\).\n  \\For{each adaptable layer \\(\\ell\\)}\n    \\If{layer is depthwise/LayerNorm/linear}\n      \\State Compute \\(P_\\ell v\\) via FFT-based circulant inverse.\n    \\Else\n      \\State Compute \\(P_\\ell v\\) using current KFAC eigenpairs \\((V_\\ell, \\Lambda_\\ell)\\).\n    \\EndIf\n    \\If{\\(t \\le T\\)}\n      \\State Oja update: \\(V_\\ell \\leftarrow V_\\ell + \\eta((g_{t,\\ell} g_{t,\\ell}^\\top) V_\\ell - V_\\ell \\Lambda_\\ell)\\); QR re-orthogonalise.\n    \\EndIf\n    \\State Tail energy estimate \\(E_{\\text{tail}}\\); if \\(E_{\\text{tail}} > \\epsilon\\) and memory budget allows, grow rank via one power-iteration step.\n    \\State Preconditioned gradient \\(\\tilde{g}_{t,\\ell} \\leftarrow P_\\ell g_{t,\\ell}\\); Mahalanobis \\(d^2_{\\ell} \\leftarrow g_{t,\\ell}^\\top \\tilde{g}_{t,\\ell}\\).\n    \\State Trust-region step size \\(\\alpha_\\ell \\leftarrow \\min\\big(1, \\Delta / \\sqrt{d^2_{\\ell}}\\big)\\).\n  \\EndFor\n  \\State Compute entropy \\(H(p_t)\\).\n  \\For{each adaptable layer \\(\\ell\\)}\n    \\If{\\(H(p_t) > \\tau\\) and \\(d^2_{\\ell} \\le \\kappa\\)}\n      \\State Update parameters: \\(\\theta_\\ell \\leftarrow \\theta_\\ell - \\alpha_\\ell \\tilde{g}_{t,\\ell}\\).\n    \\EndIf\n  \\EndFor\n  \\State Update Kalman bias state with logits \\(z_t\\) using confidence weighting; adjust classifier bias.\n\\EndFor\n\\end{algorithmic}\n\\end{algorithm}",
+    "experimental_setup": "\\subsection{Protocol}\nWe follow the online benchmark of \\cite{alfarra-2023-evaluation}: the data stream arrives at a constant frame rate and adaptation time counts against throughput.\n\n\\subsection{Datasets and models}\nExperiment 1 (curvature drift) uses ImageNet-C v1.1 (15 corruptions \\(\\times\\) 5 severities) streamed sequentially from severity 1\\(\\rightarrow\\)5 and ImageNet-3DCC (50\\,k rendered frames with continuous yaw/pitch) on ResNet-50-BN. Experiment 2 (cross-architecture) runs Tiny-ImageNet-C, ImageNet-A and ESC-50-Noise on ConvNeXt-Tiny, ViT-B/16 and an Audio Spectrogram Transformer respectively. Experiment 3 (safety) inserts 50 oversaturated \"trap\" frames into the ImageNet-C fog stream.\n\n\\subsection{Baselines}\nSource-frozen, Tent-1 and Tent-5 \\cite{wang-2020-tent}, PROTA \\cite{boudiaf-2022-parameter}, OSTA, CoTTA, and POEM \\cite{bar-2024-protected}. All repositories are run in fp32 on a single RTX-3090. Batch sizes are 32 (CNNs), 16 (ViT) and 8 (audio).\n\n\\subsection{Hyper-parameters}\nFor APTA we fix \\(\\eta = 5 \\times 10^{-3}\\), \\(\\epsilon = 0.05\\), \\(\\Delta = 1.0\\), \\(\\tau = 1.0\\) nats and \\(\\kappa = 350\\). These were selected on the first 5\\,k Gaussian-noise frames of ImageNet-C severity-2 and then frozen. Baseline parameters follow their original papers.\n\n\\subsection{Metrics}\nPrimary: stream-average top-1 error (vision) or accuracy (audio). Secondary: effective rank, extra memory (MB), latency (ms / image), energy (J / frame), percentage of skipped updates and expected calibration error. Robustness: worst-case ImageNet-V2 error after adaptation and cosine similarity between source and adapted eigenvectors. All numbers are averaged over three deterministic seeds \\{2023, 2027, 2031\\}.",
+    "results": "\\subsection{Experiment 1 - curvature drift}\nOn ImageNet-C severity-5, APTA attains \\(37.1 \\pm 0.1\\,\\%\\) error, outperforming PROTA \\(38.9 \\pm 0.2\\,\\%\\) and Tent-5 \\(38.4 \\pm 0.3\\,\\%\\). Throughput is 221 FPS versus PROTA's 228 FPS (3\\% slower) and memory rises from 570 MB to 610 MB, well inside the \\(1.8\\times\\) limit. Effective rank grows to 7.2 in the final ResNet block, confirming adaptive allocation. On the continuous ImageNet-3DCC stream APTA lowers the first-500-frame error by 4 pp relative to PROTA; eigenvector cosine similarity drops from 0.93 to 0.71, indicating curvature rotation that PROTA cannot track. The dual gate skips 2.4 \\% of updates.\n\n\\subsection{Experiment 2 - cross-architecture and modality}\nConvNeXt-Tiny on Tiny-ImageNet-C severity-5: APTA 46.3\\% error versus 49.4\\% for fixed-rank KFAC and 52.1\\% for Tent-1. Disabling the circulant switch degrades APTA by 1.8 pp and adds 18\\% latency. ViT-B/16 on ImageNet-A: APTA 54.7\\% error, Tent 57.9\\%; OSTA diverges for two seeds. Audio Spectrogram Transformer on ESC-50-Noise: APTA reaches 70.2\\% accuracy, +5 pp over the frozen source and +6 pp over OSTA. Across all models compute overhead \\(C(g)\\) remains \\(1.13\\text{-}1.18\\); extra memory never exceeds 8 MB for ConvNeXt.\n\n\\subsection{Ablations}\nFixing the rank (+1.4 pp error), disabling Oja updates (+1.1 pp), removing the dual gate (two catastrophic events in Experiment 3) or replacing the trust-region step with a scalar learning rate (+0.6 pp) all hurt performance, confirming each component's value.\n\n\\subsection{Experiment 3 - safety gate}\nEntropy-only gating (\\(\\kappa = \\infty\\)) suffers three catastrophic divergences; PROTA's entropy gate sees five. APTA records none and shows a 1.2\\% false-skip rate. The Mahalanobis distance distribution is heavy-tailed for the inserted trap frames, justifying the \\(\\kappa\\) threshold.\n\n\\subsection{Limitations}\nAPTA still requires backward-pass access; fully black-box deployments would need gradient extraction. The rank-growth heuristic may overshoot under extreme shifts and could benefit from hardware-aware damping.",
+    "conclusion": "APTA advances test-time adaptation by learning the curvature, not just the parameters. Streaming Oja updates, demand-driven rank growth and efficient circulant inverses deliver consistent gains across convolutional, transformer and audio models while keeping compute within \\(1.15\\times\\) and memory within \\(1.8\\times\\) of standard inference. The dual entropy-and-Mahalanobis safety gate eradicates catastrophic failures that hamper existing methods, making APTA suitable for edge devices where both speed and reliability are paramount. Future work will couple APTA's curvature signals with selective label querying, diffusion-based input correction and continual compression to push the memory budget below \\(1.5\\times\\) while retaining safety and speed."
+}
