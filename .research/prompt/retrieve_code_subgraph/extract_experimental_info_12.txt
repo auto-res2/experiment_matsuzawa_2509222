@@ -1,0 +1,1929 @@
+
+Input:
+You are a researcher with expertise in engineering in the field of machine learning.
+
+# Instructions
+- The content described in “Repository Content” corresponds to the GitHub repository of the method described in “Method.”
+- Please extract the following two pieces of information from “Repository Content”:
+    - experimental_code：Extract the implementation sections that are directly related to the method described in “Method.”
+    - experimental_info：Extract and output the experimental settings related to the method described in “Method.”
+
+# Method
+The core methodology involves reformulating the sampling variance optimization as an adversary bandit problem. Instead of explicitly computing the intractable optimal sampling distribution, the approach maintains nonparametric estimates of the sampler and iteratively updates it based on partial knowledge acquired from sampled neighbors. The reward for each action (choosing a set of neighbors) is defined as the negative derivative of the effective sampling variance. Two bandit algorithms are proposed: GNN-BS, which samples one neighbor at a time (repeated k times) and updates the sampler using EXP3; and GNN-BS.M, which samples a k-element subset of neighbors once using the DepRound sampler and updates using EXP3.M. For attentive GNNs, where attention values (αij) cannot be fully evaluated with sampled neighborhoods, adjusted feedback attention values are defined to approximate the true attention values.
+
+# Repository Content
+File Path: __init__.py
+Content:
+from __future__ import print_function
+from __future__ import division
+
+File Path: inits.py
+Content:
+import tensorflow as tf
+import numpy as np
+
+
+def uniform(shape, scale=0.05, name=None):
+    """Uniform init."""
+    initial = tf.random_uniform(shape, minval=-scale, maxval=scale, dtype=tf.float32)
+    return tf.Variable(initial, name=name)
+
+
+def glorot(shape, name=None):
+    """Glorot & Bengio (AISTATS 2010) init."""
+    init_range = np.sqrt(6.0/(shape[0]+shape[1]))
+    #initial = tf.random_uniform(shape, minval=-init_range, maxval=init_range, dtype=tf.float32)
+    initial = tf.random_uniform_initializer(minval=-init_range, maxval=init_range, dtype=tf.float32)
+    #return tf.Variable(initial, name=name)
+    return tf.get_variable(name, shape, initializer=initial)
+
+
+def zeros(shape, name=None):
+    """All zeros."""
+    initial = tf.zeros(shape, dtype=tf.float32)
+    return tf.Variable(initial, name=name)
+
+
+def ones(shape, name=None):
+    """All ones."""
+    initial = tf.ones(shape, dtype=tf.float32)
+    return tf.Variable(initial, name=name)
+
+File Path: lanczos.py
+Content:
+import numpy as np
+from numpy.linalg import norm
+from utils import load_data as dataload
+import scipy.sparse as sparse
+import pickle
+from scipy.linalg import qr, svd
+
+def lanczos(A,k,q):
+    n = A.shape[0]
+    Q = np.zeros((n,k+1))
+
+    Q[:,0] = q/norm(q)
+
+    alpha = 0
+    beta = 0
+
+    for i in range(k):
+      if i == 0:
+        q = np.dot(A,Q[:,i])
+      else:
+        q = np.dot(A, Q[:,i]) - beta*Q[:,i-1]
+      alpha = np.dot(q.T, Q[:,i])
+      q = q - Q[:,i]*alpha
+      q = q - np.dot(Q[:,:i], np.dot(Q[:,:i].T, q)) # full reorthogonalization
+      beta = norm(q)
+      Q[:,i+1] = q/beta
+      print(i)
+
+    Q = Q[:,:k]
+
+    Sigma = np.dot(Q.T, np.dot(A, Q))
+    # A2 = np.dot(Q[:,:k], np.dot(Sigma[:k,:k], Q[:,:k].T))
+    # return A2
+    return Q, Sigma
+
+def dense_RandomSVD(A,K):
+    G = np.random.randn(A.shape[0],K)
+    B = np.dot(A,G)
+    Q,R =qr(B,mode='economic')
+    M = np.dot(np.dot(Q, np.dot(np.dot(Q.T, A),Q)),Q.T)
+    return M
+
+
+if __name__=="__main__":
+    adj, features, y_train, y_val, y_test, train_mask, val_mask, test_mask = dataload('cora')
+    print(adj.shape)
+    adj = np.array(sparse.csr_matrix.todense(adj))
+    # np.save("ADJ_cora.npy",adj)
+    q = np.random.randn(adj.shape[0],)
+    Q, sigma = lanczos(adj,100,q)
+    r = 100
+    A2 = np.dot(Q[:,:r], np.dot(sigma[:r,:r], Q[:,:r].T))
+
+    # u,v,a = svd(adj)
+
+    err = norm(adj-A2)/norm(adj)
+    print(err)
+
+
+# A = np.random.random((10000,10000))
+# A = np.triu(A) + np.triu(A).T
+# q = np.random.random((10000,))
+# K = 100
+# Q, sigma = lanczos(A,K,q)
+# r = 100
+# A2 = np.dot(Q[:,:r], np.dot(sigma[:r,:r], Q[:,:r].T))
+# err = norm(A-A2)/norm(A)
+# print(err)
+
+File Path: layers.py
+Content:
+from inits import *
+import tensorflow as tf
+
+flags = tf.app.flags
+FLAGS = flags.FLAGS
+
+# global unique layer ID dictionary for layer name assignment
+_LAYER_UIDS = {}
+
+
+def get_layer_uid(layer_name=''):
+    """Helper function, assigns unique layer IDs."""
+    if layer_name not in _LAYER_UIDS:
+        _LAYER_UIDS[layer_name] = 1
+        return 1
+    else:
+        _LAYER_UIDS[layer_name] += 1
+        return _LAYER_UIDS[layer_name]
+
+
+def sparse_dropout(x, keep_prob, noise_shape):
+    """Dropout for sparse tensors."""
+    random_tensor = keep_prob
+    random_tensor += tf.random_uniform(noise_shape)
+    dropout_mask = tf.cast(tf.floor(random_tensor), dtype=tf.bool)
+    pre_out = tf.sparse_retain(x, dropout_mask)
+    return pre_out * (1./keep_prob)
+
+
+def dot(x, y, sparse=False):
+    """Wrapper for tf.matmul (sparse vs dense)."""
+    if sparse:
+        res = tf.sparse_tensor_dense_matmul(x, y)
+    else:
+        res = tf.matmul(x, y)
+    return res
+
+
+class Layer(object):
+    """Base layer class. Defines basic API for all layer objects.
+    Implementation inspired by keras (http://keras.io).
+
+    # Properties
+        name: String, defines the variable scope of the layer.
+        logging: Boolean, switches Tensorflow histogram logging on/off
+
+    # Methods
+        _call(inputs): Defines computation graph of layer
+            (i.e. takes input, returns output)
+        __call__(inputs): Wrapper for _call()
+        _log_vars(): Log all variables
+    """
+
+    def __init__(self, **kwargs):
+        allowed_kwargs = {'name', 'logging'}
+        for kwarg in kwargs.keys():
+            assert kwarg in allowed_kwargs, 'Invalid keyword argument: ' + kwarg
+        name = kwargs.get('name')
+        if not name:
+            layer = self.__class__.__name__.lower()
+            name = layer + '_' + str(get_layer_uid(layer))
+        self.name = name
+        self.vars = {}
+        logging = kwargs.get('logging', False)
+        self.logging = logging
+        self.sparse_inputs = False
+
+    def _call(self, inputs):
+        return inputs
+
+    def __call__(self, inputs):
+        with tf.name_scope(self.name):
+            if self.logging and not self.sparse_inputs:
+                tf.summary.histogram(self.name + '/inputs', inputs)
+            outputs = self._call(inputs)
+            if self.logging:
+                for output in outputs:
+                    tf.summary.histogram(self.name + '/outputs', output)
+            return outputs
+
+    def _log_vars(self):
+        for var in self.vars:
+            tf.summary.histogram(self.name + '/vars/' + var, self.vars[var])
+
+
+class Dense(Layer):
+    """Dense layer."""
+    def __init__(self, input_dim, output_dim, placeholders, dropout=0., sparse_inputs=False,
+                 act=tf.nn.relu, bias=False, featureless=False, **kwargs):
+        super(Dense, self).__init__(**kwargs)
+
+        if dropout:
+            self.dropout = placeholders['dropout']
+        else:
+            self.dropout = 0.
+
+        self.act = act
+        self.sparse_inputs = sparse_inputs
+        self.featureless = featureless
+        self.bias = bias
+
+        # helper variable for sparse dropout
+        self.num_features_nonzero = placeholders['num_features_nonzero']
+
+        with tf.variable_scope(self.name + '_vars'):
+            self.vars['weights'] = glorot([input_dim, output_dim],
+                                          name='weights')
+            if self.bias:
+                self.vars['bias'] = zeros([output_dim], name='bias')
+
+        if self.logging:
+            self._log_vars()
+
+    def _call(self, inputs):
+        x = inputs
+
+        # dropout
+        if self.sparse_inputs:
+            x = sparse_dropout(x, 1-self.dropout, self.num_features_nonzero)
+        else:
+            x = tf.nn.dropout(x, 1-self.dropout)
+
+        # transform
+        output = dot(x, self.vars['weights'], sparse=self.sparse_inputs)
+
+        # bias
+        if self.bias:
+            output += self.vars['bias']
+
+        return self.act(output), 0
+
+
+class GraphConvolution(Layer):
+    """Graph convolution layer."""
+    def __init__(self, input_dim, output_dim, placeholders, dropout=0.,
+                 support=None, sparse_inputs=False, act=tf.nn.relu, bias=False,
+                 featureless=False, **kwargs):
+        super(GraphConvolution, self).__init__(**kwargs)
+
+        if dropout:
+            self.dropout = placeholders['dropout']
+        else:
+            self.dropout = 0.
+
+        self.act = act
+        if support is None:
+            self.support = placeholders['support'][0]
+        else:
+            self.support = support
+        self.sparse_inputs = sparse_inputs
+        self.featureless = featureless
+        self.bias = bias
+
+        # helper variable for sparse dropout
+        self.num_features_nonzero = placeholders['num_features_nonzero']
+
+        with tf.variable_scope(self.name + '_vars'):
+            for i in range(1):
+                self.vars['weights_' + str(i)] = glorot([input_dim, output_dim],
+                                                        name='weights_' + str(i))
+            if self.bias:
+                self.vars['bias'] = zeros([output_dim], name='bias')
+
+        if self.logging:
+            self._log_vars()
+
+    def _call(self, inputs):
+        x = inputs
+
+        # dropout
+        if self.sparse_inputs:
+            x = sparse_dropout(x, 1-self.dropout, self.num_features_nonzero)
+        else:
+            x = tf.nn.dropout(x, 1-self.dropout)
+
+        if not self.featureless:
+            pre_sup = dot(x, self.vars['weights_0'],
+                          sparse=self.sparse_inputs)
+        else:
+            pre_sup = self.vars['weights_0']
+        output = dot(self.support, pre_sup, sparse=True)
+
+        # bias
+        if self.bias:
+            output += self.vars['bias']
+
+        return self.act(output), 0
+
+
+class GraphSampleConvolution(Layer):
+    """Graph convolution layer."""
+    def __init__(self, input_dim, output_dim, placeholders,
+                 support, #prob, self_features,
+                 name = 'con',
+                 sparse_support=True,
+                 sparse_inputs=False, act=tf.nn.relu, bias=False,
+                 dropout=False, featureless=False, **kwargs):
+        super(GraphSampleConvolution, self).__init__(**kwargs)
+
+        if dropout:
+            self.dropout = placeholders['dropout']
+        else:
+            self.dropout = 0.
+
+        self.name = name
+        self.act = act
+        self.support = support
+        self.sparse_support = sparse_support
+        self.sparse_inputs = sparse_inputs
+        self.featureless = featureless
+        self.bias = bias
+
+        # helper variable for sparse dropout
+        self.num_features_nonzero = placeholders['num_features_nonzero']
+
+        with tf.variable_scope(self.name + '_vars'):
+            self.vars['weights'] = glorot([input_dim, output_dim],
+                                          name='weights')
+            if self.bias:
+                self.vars['bias'] = zeros([output_dim], name='bias')
+
+        if self.logging:
+            self._log_vars()
+
+    def _call(self, inputs):
+        x = inputs
+
+        # dropout
+        if self.sparse_inputs:
+            x = sparse_dropout(x, 1-self.dropout, self.num_features_nonzero)
+        else:
+            x = tf.nn.dropout(x, 1-self.dropout)
+
+        if not self.featureless:
+            pre_sup = dot(x, self.vars['weights'], sparse=self.sparse_inputs)
+        else:
+            pre_sup = self.vars['weights']
+
+        output = dot(self.support, pre_sup, sparse=self.sparse_support)
+
+        # bias
+        if self.bias:
+            output += self.vars['bias']
+
+        return self.act(output), 0
+
+
+class GraphSampleConvolutionReg(Layer):
+    """Graph convolution layer."""
+    def __init__(self, input_dim, output_dim, placeholders,
+                 support, #prob, self_features,
+                 name = 'con_reg',
+                 sparse_support=True,
+                 sparse_inputs=False, act=tf.nn.relu, bias=False,
+                 dropout=False, featureless=False, **kwargs):
+        super(GraphSampleConvolutionReg, self).__init__(**kwargs)
+
+        if dropout:
+            self.dropout = placeholders['dropout']
+        else:
+            self.dropout = 0.
+
+        self.name = name
+        self.act = act
+        self.support = support
+        self.sparse_support = sparse_support
+        self.sparse_inputs = sparse_inputs
+        self.featureless = featureless
+        self.bias = bias
+        self.output_dim = output_dim
+        # helper variable for sparse dropout
+        self.num_features_nonzero = placeholders['num_features_nonzero']
+
+        with tf.variable_scope(self.name + '_vars'):
+            self.vars['weights'] = glorot([input_dim, output_dim],
+                                          name='weights')
+            if self.bias:
+                self.vars['bias'] = zeros([output_dim], name='bias')
+
+        if self.logging:
+            self._log_vars()
+
+    def _call(self, inputs):
+        x = inputs
+
+        # dropout
+        if self.sparse_inputs:
+            x = sparse_dropout(x, 1-self.dropout, self.num_features_nonzero)
+        else:
+            x = tf.nn.dropout(x, 1-self.dropout)
+
+        if not self.featureless:
+            pre_sup = dot(x, self.vars['weights'], sparse=self.sparse_inputs)
+        else:
+            pre_sup = self.vars['weights']
+
+        output = dot(self.support, pre_sup, sparse=self.sparse_support)
+
+        n_v = tf.cast(tf.shape(self.support)[0], tf.float32)
+        n_u = tf.cast(tf.shape(self.support)[1], tf.float32)
+
+        mean_output = tf.reshape(tf.reduce_mean(output, axis=0), (1, -1))
+        if self.sparse_support:
+            mean_support = 1.0/tf.cast(n_v, tf.float32)*tf.sparse_reduce_sum(self.support, axis=0)
+        else:
+            mean_support = 1.0/tf.cast(n_v, tf.float32)*tf.reduce_sum(self.support, axis=0)
+        diff = tf.reshape(mean_support, (-1,1))*pre_sup - mean_output
+        reg = 1.0 / tf.cast(n_u * self.output_dim, tf.float32) * tf.reduce_sum(diff * diff)
+
+
+        # bias
+        if self.bias:
+            output += self.vars['bias']
+
+        return self.act(output), reg
+
+
+class GraphSampleConvolutionSkip(Layer):
+    """Graph convolution layer."""
+    def __init__(self, input_dim, output_dim, placeholders,
+                 support, #prob, self_features,
+                 name = 'con_reg',
+                 sparse_support=True,
+                 sparse_inputs=False, act=tf.nn.relu, bias=False,
+                 dropout=False, featureless=False, **kwargs):
+        super(GraphSampleConvolutionSkip, self).__init__(**kwargs)
+
+        if dropout:
+            self.dropout = placeholders['dropout']
+        else:
+            self.dropout = 0.
+
+        self.name = name
+        self.act = act
+        self.support = support
+        self.sparse_support = sparse_support
+        self.sparse_inputs = sparse_inputs
+        self.featureless = featureless
+        self.bias = bias
+        self.output_dim = output_dim
+        # helper variable for sparse dropout
+        self.num_features_nonzero = placeholders['num_features_nonzero']
+
+
+        with tf.variable_scope('con_vars', reuse=True):
+            w_12 = tf.get_variable('weights', [input_dim, FLAGS.hidden1])
+        with tf.variable_scope('con_reg_vars', reuse=True):
+            w_23 = tf.get_variable('weights', [FLAGS.hidden1, output_dim])
+        self.vars['weights'] = tf.matmul(w_12, w_23)
+
+        if self.bias:
+            self.vars['bias'] = zeros([output_dim], name='bias')
+
+        if self.logging:
+            self._log_vars()
+
+    def _call(self, inputs):
+        x = inputs
+
+        # dropout
+        if self.sparse_inputs:
+            x = sparse_dropout(x, 1-self.dropout, self.num_features_nonzero)
+        else:
+            x = tf.nn.dropout(x, 1-self.dropout)
+
+        if not self.featureless:
+            pre_sup = dot(x, self.vars['weights'], sparse=self.sparse_inputs)
+        else:
+            pre_sup = self.vars['weights']
+
+        output = dot(self.support, pre_sup, sparse=self.sparse_support)
+
+        # bias
+        if self.bias:
+            output += self.vars['bias']
+
+        return self.act(output), 0
+
+
+
+
+File Path: metrics.py
+Content:
+import tensorflow as tf
+
+
+
+def masked_softmax_cross_entropy(preds, labels, mask):
+    """Softmax cross-entropy loss with masking."""
+    loss = tf.nn.softmax_cross_entropy_with_logits(logits=preds, labels=labels)
+    mask = tf.cast(mask, dtype=tf.float32)
+    mask /= tf.reduce_mean(mask)
+    loss *= mask
+    return tf.reduce_mean(loss)
+
+
+def masked_accuracy(preds, labels, mask):
+    """Accuracy with masking."""
+    correct_prediction = tf.equal(tf.argmax(preds, 1), tf.argmax(labels, 1))
+    accuracy_all = tf.cast(correct_prediction, tf.float32)
+    mask = tf.cast(mask, dtype=tf.float32)
+    mask /= tf.reduce_mean(mask)
+    accuracy_all *= mask
+    return tf.reduce_mean(accuracy_all)
+
+
+def softmax_cross_entropy(preds, labels):
+    loss = tf.nn.softmax_cross_entropy_with_logits(logits=preds, labels=labels)
+    return tf.reduce_mean(loss)
+
+def accuracy(preds, labels):
+    correct_prediction = tf.equal(tf.argmax(preds, 1), tf.argmax(labels, 1))
+    accuracy_all = tf.cast(correct_prediction, tf.float32)
+    return tf.reduce_mean(accuracy_all)
+
+
+
+File Path: models.py
+Content:
+from layers import *
+from metrics import *
+
+flags = tf.app.flags
+FLAGS = flags.FLAGS
+
+
+class Model(object):
+    def __init__(self, **kwargs):
+        allowed_kwargs = {'name', 'logging'}
+        for kwarg in kwargs.keys():
+            assert kwarg in allowed_kwargs, 'Invalid keyword argument: ' + kwarg
+        name = kwargs.get('name')
+        if not name:
+            name = self.__class__.__name__.lower()
+        self.name = name
+
+        logging = kwargs.get('logging', False)
+        self.logging = logging
+
+        self.vars = {}
+        self.placeholders = {}
+
+        self.layers = []
+        self.activations = []
+
+        self.inputs = None
+        self.outputs = None
+
+        self.loss = 0
+        self.reg_loss = 0
+        self.accuracy = 0
+        self.optimizer = None
+        self.opt_op = None
+
+    def _build(self):
+        raise NotImplementedError
+
+    def build(self):
+        """ Wrapper for _build() """
+        with tf.variable_scope(self.name):
+            self._build()
+
+        # Build sequential layer model
+        self.activations.append(self.inputs)
+
+        # uncomment the following to enable skip connection
+        # hidden_12, reg_loss_12 = self.layers[0](self.inputs)
+        # hidden_23, reg_loss_23 = self.layers[1](hidden_12)
+        # self.outputs = hidden_23
+        # hidden_13, reg_loss_13 = self.layers[2](self.inputs)
+        # self.outputs += FLAGS.skip*hidden_13
+        # self.reg_loss = reg_loss_23
+        for layer in self.layers:
+            hidden, reg_loss = layer(self.activations[-1])
+            self.activations.append(hidden)
+
+        self.reg_loss += reg_loss
+        self.outputs = self.activations[-1]
+
+        # Store model variables for easy access
+        variables = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope=self.name)
+        self.vars = {var.name: var for var in variables}
+
+        # Build metrics
+        self._loss()
+        self._accuracy()
+
+        self.opt_op = self.optimizer.minimize(self.loss)
+
+    def predict(self):
+        pass
+
+    def _loss(self):
+        raise NotImplementedError
+
+    def _accuracy(self):
+        raise NotImplementedError
+
+    def save(self, sess=None):
+        if not sess:
+            raise AttributeError("TensorFlow session not provided.")
+        saver = tf.train.Saver(self.vars)
+        save_path = saver.save(sess, "tmp/%s.ckpt" % self.name)
+        print("Model saved in file: %s" % save_path)
+
+    def load(self, sess=None):
+        if not sess:
+            raise AttributeError("TensorFlow session not provided.")
+        saver = tf.train.Saver(self.vars)
+        save_path = "tmp/%s.ckpt" % self.name
+        saver.restore(sess, save_path)
+        print("Model restored from file: %s" % save_path)
+
+
+class MLP(Model):
+    def __init__(self, placeholders, input_dim, **kwargs):
+        super(MLP, self).__init__(**kwargs)
+
+        self.inputs = placeholders['features']
+        self.input_dim = input_dim
+        # self.input_dim = self.inputs.get_shape().as_list()[1]  # To be supported in future Tensorflow versions
+        self.output_dim = placeholders['labels'].get_shape().as_list()[1]
+        self.placeholders = placeholders
+
+        self.optimizer = tf.train.AdamOptimizer(learning_rate=FLAGS.learning_rate)
+
+        self.build()
+
+    def _loss(self):
+        # Weight decay loss
+        for var in self.layers[0].vars.values():
+            self.loss += FLAGS.weight_decay * tf.nn.l2_loss(var)
+
+        # Cross entropy error
+        self.loss += masked_softmax_cross_entropy(self.outputs, self.placeholders['labels'],
+                                                  self.placeholders['labels_mask'])
+
+    def _accuracy(self):
+        self.accuracy = masked_accuracy(self.outputs, self.placeholders['labels'],
+                                        self.placeholders['labels_mask'])
+
+    def _build(self):
+        self.layers.append(Dense(input_dim=self.input_dim,
+                                 output_dim=FLAGS.hidden1,
+                                 placeholders=self.placeholders,
+                                 act=tf.nn.relu,
+                                 dropout=True,
+                                 sparse_inputs=True,
+                                 logging=self.logging))
+
+        self.layers.append(Dense(input_dim=FLAGS.hidden1,
+                                 output_dim=self.output_dim,
+                                 placeholders=self.placeholders,
+                                 act=lambda x: x,
+                                 dropout=True,
+                                 logging=self.logging))
+
+    def predict(self):
+        return tf.nn.softmax(self.outputs)
+
+
+class GCN(Model):
+    def __init__(self, placeholders, input_dim, **kwargs):
+        super(GCN, self).__init__(**kwargs)
+
+        self.inputs = placeholders['features']
+        self.input_dim = input_dim
+        # self.input_dim = self.inputs.get_shape().as_list()[1]  # To be supported in future Tensorflow versions
+        self.output_dim = placeholders['labels'].get_shape().as_list()[1]
+        self.placeholders = placeholders
+
+        self.optimizer = tf.train.AdamOptimizer(learning_rate=FLAGS.learning_rate)
+
+        self.build()
+
+    def _loss(self):
+        # Weight decay loss
+        for var in self.layers[0].vars.values():
+            self.loss += FLAGS.weight_decay * tf.nn.l2_loss(var)
+
+        # Cross entropy error
+        self.loss += masked_softmax_cross_entropy(self.outputs, self.placeholders['labels'],
+                                                  self.placeholders['labels_mask'])
+
+    def _accuracy(self):
+        self.accuracy = masked_accuracy(self.outputs, self.placeholders['labels'],
+                                        self.placeholders['labels_mask'])
+
+    def _build(self):
+
+        self.layers.append(GraphConvolution(input_dim=self.input_dim,
+                                            output_dim=FLAGS.hidden1,
+                                            placeholders=self.placeholders,
+                                            act=tf.nn.relu,
+                                            dropout=True,
+                                            sparse_inputs=True,
+                                            logging=self.logging))
+
+        self.layers.append(GraphConvolution(input_dim=FLAGS.hidden1,
+                                            output_dim=self.output_dim,
+                                            placeholders=self.placeholders,
+                                            act=lambda x: x,
+                                            dropout=True,
+                                            logging=self.logging))
+
+    def predict(self):
+        return tf.nn.softmax(self.outputs)
+
+
+class GCNAdapt(Model):
+    def __init__(self, placeholders, input_dim, sample_train=False, **kwargs):
+        super(GCNAdapt, self).__init__(**kwargs)
+        self.features = placeholders['features_inputs']
+        self.inputs = self.features[0]
+        self.input_dim = input_dim
+        # self.input_dim = self.inputs.get_shape().as_list()[1]  # To be supported in future Tensorflow versions
+        self.output_dim = placeholders['labels'].get_shape().as_list()[1]
+        self.placeholders = placeholders
+        self.supports = placeholders['support']
+        self.probs = placeholders['prob']
+        self.optimizer = tf.train.AdamOptimizer(learning_rate=FLAGS.learning_rate)
+        # with tf.variable_scope(self.name + '_vars'):
+        #     self.sample_params = glorot([input_dim, 2], name='sample_params')
+        with tf.variable_scope(self.name, reuse=True):
+            self.sample_params =tf.get_variable('sample_weights', [input_dim, 2])
+
+        self.support_21 = self._attention(self.supports[0], self.features[0], self.features[1], self.probs[0])
+        self.support_32 = self._attention(self.supports[1], self.features[1], self.features[2], self.probs[1])
+        # self.attention_31 = tf.sparse_tensor_dense_matmul(self.attention_32, tf.sparse_tensor_to_dense(self.attention_21, validate_indices=False))  # for skip connection
+
+        self.build()
+
+    def _loss(self):
+        # Weight decay loss
+        for var in self.layers[0].vars.values():
+            self.loss += FLAGS.weight_decay * tf.nn.l2_loss(var)
+
+        # Cross entropy error
+        self.loss += softmax_cross_entropy(self.outputs, self.placeholders['labels'])
+
+        self.loss += FLAGS.var*self.reg_loss
+
+    def _accuracy(self):
+        self.accuracy = accuracy(self.outputs, self.placeholders['labels'])
+
+    def _attention(self, support, x_u, x_v, prob):
+        sample_params = self.sample_params
+        n_v = tf.shape(support)[0]
+        n_u = tf.shape(support)[1]
+        h_v = tf.matmul(x_v, tf.expand_dims(sample_params[:,0], -1))          # v*1
+        h_u = tf.matmul(x_u, tf.expand_dims(sample_params[:,1], -1))          # u*1
+        attention = 1/tf.cast(n_u, tf.float32) * (tf.nn.relu(h_v + tf.reshape(h_u, (1, n_u))) + 1)       # v*u
+        support = support*(attention/tf.reshape(prob, (1, n_u)))
+
+        return support
+
+    def _build(self):
+        self.layers.append(GraphSampleConvolution(input_dim=self.input_dim,
+                                                  output_dim=FLAGS.hidden1,
+                                                  placeholders=self.placeholders,
+                                                  support=self.support_21,
+                                                  act=tf.nn.relu,
+                                                  dropout=True,
+                                                  sparse_inputs=False,
+                                                  logging=self.logging))
+
+        self.layers.append(GraphSampleConvolutionReg(input_dim=FLAGS.hidden1,
+                                                      output_dim=self.output_dim,
+                                                      placeholders=self.placeholders,
+                                                      support=self.support_32,
+                                                      act=lambda x: x,
+                                                      dropout=True,
+                                                      logging=self.logging))
+
+    def predict(self):
+        return tf.nn.softmax(self.outputs)
+
+
+class GCNAdaptMix(Model):
+    def __init__(self, placeholders, input_dim, sample_train=False, **kwargs):
+        super(GCNAdaptMix, self).__init__(**kwargs)
+        self.features = placeholders['features_inputs']
+        self.inputs = self.features[0]
+        self.input_dim = input_dim
+        # self.input_dim = self.inputs.get_shape().as_list()[1]  # To be supported in future Tensorflow versions
+        self.output_dim = placeholders['labels'].get_shape().as_list()[1]
+        self.placeholders = placeholders
+        self.supports = placeholders['support']
+        self.probs = placeholders['prob']
+        self.optimizer = tf.train.AdamOptimizer(learning_rate=FLAGS.learning_rate)
+
+        with tf.variable_scope(self.name, reuse=True):
+            self.sample_params =tf.get_variable('sample_weights', [input_dim, 2])
+
+        self.build()
+
+    def _loss(self):
+        # Weight decay loss
+        for var in self.layers[0].vars.values():
+            self.loss += FLAGS.weight_decay * tf.nn.l2_loss(var)
+
+        # Cross entropy error
+        self.loss += softmax_cross_entropy(self.outputs, self.placeholders['labels'])
+
+        self.loss += FLAGS.var * self.reg_loss
+
+    def _accuracy(self):
+        self.accuracy = accuracy(self.outputs, self.placeholders['labels'])
+
+    def _attention(self, support, x_u, x_v, prob):
+        sample_params = self.sample_params
+        n_v = tf.shape(x_v)[0]
+        n_u = tf.shape(x_u)[0]
+        h_v = tf.matmul(x_v, tf.expand_dims(sample_params[:,0], -1))          # v*1
+        h_u = tf.matmul(x_u, tf.expand_dims(sample_params[:,1], -1))          # u*1
+        attention = 1/tf.cast(n_u, tf.float32) * (tf.nn.relu(h_v + tf.reshape(h_u, (1, n_u))) + 1)       # v*u
+        support = support*(1*attention/tf.reshape(prob, (1, n_u)))
+        return support
+
+    def _build(self):
+        self.layers.append(Dense(input_dim=self.input_dim,
+                                 output_dim=FLAGS.hidden1,
+                                 placeholders=self.placeholders,
+                                 act=tf.nn.relu,
+                                 dropout=True,
+                                 sparse_inputs=False,
+                                 logging=self.logging))
+
+        self.layers.append(GraphSampleConvolutionReg(input_dim=FLAGS.hidden1,
+                                                      output_dim=self.output_dim,
+                                                      placeholders=self.placeholders,
+                                                      support=self._attention(self.supports[0], self.features[0], self.features[1], self.probs[0]),
+                                                      act=lambda x: x,
+                                                      dropout=True,
+                                                      logging=self.logging))
+
+    def predict(self):
+        return tf.nn.softmax(self.outputs)
+
+
+
+File Path: run_pubmed.py
+Content:
+from __future__ import division
+from __future__ import print_function
+
+import tensorflow as tf
+
+import time
+import os
+from inits import *
+from sampler import *
+from models import GCNAdapt, GCNAdaptMix
+
+# Set random seed
+seed = 123
+np.random.seed(seed)
+tf.set_random_seed(seed)
+
+# Settings
+flags = tf.app.flags
+FLAGS = flags.FLAGS
+flags.DEFINE_string('dataset', 'cora', 'Dataset string.')  # 'cora', 'citeseer', 'pubmed'
+flags.DEFINE_string('model', 'gcn_adapt', 'Model string.')  # 'gcn', 'gcn_appr'
+flags.DEFINE_float('learning_rate', 0.001, 'Initial learning rate.')
+flags.DEFINE_integer('epochs', 300, 'Number of epochs to train.')
+flags.DEFINE_integer('hidden1', 16, 'Number of units in hidden layer 1.')
+flags.DEFINE_float('dropout', 0.0, 'Dropout rate (1 - keep probability).')
+flags.DEFINE_float('weight_decay', 5e-4, 'Weight for L2 loss on embedding matrix.')
+flags.DEFINE_integer('early_stopping', 30, 'Tolerance for early stopping (# of epochs).')
+flags.DEFINE_integer('max_degree', 32, 'Maximum degree for constructing the adjacent matrix.')
+flags.DEFINE_string('gpu', '0', 'The gpu to be applied.')
+flags.DEFINE_string('sampler_device', 'cpu', 'The device for sampling: cpu or gpu.')
+flags.DEFINE_integer('rank', 128, 'The number of nodes per layer.')
+flags.DEFINE_integer('skip', 0, 'If use skip connection.')
+flags.DEFINE_float('var', 0.5, 'If use variance reduction.')
+os.environ["CUDA_VISIBLE_DEVICES"] = str(FLAGS.gpu)
+
+
+def main(rank1, rank0):
+
+    # Prepare data
+    adj, adj_train, adj_val_train, features, train_features, y_train, y_test, test_index = prepare_pubmed(FLAGS.dataset, FLAGS.max_degree)
+    print('preparation done!')
+
+    max_degree = FLAGS.max_degree
+    num_train = adj_train.shape[0] - 1
+    # num_train = adj_train.shape[0]
+    input_dim = features.shape[1]
+    scope = 'test'
+
+    if FLAGS.model == 'gcn_adapt_mix':
+        num_supports = 1
+        propagator = GCNAdaptMix
+        test_supports = [sparse_to_tuple(adj[test_index, :])]
+        test_features = [features, features[test_index, :]]
+        test_probs = [np.ones(adj.shape[0])]
+        layer_sizes = [rank1, 256]
+    elif FLAGS.model == 'gcn_adapt':
+        num_supports = 2
+        propagator = GCNAdapt
+        test_supports = [sparse_to_tuple(adj), sparse_to_tuple(adj[test_index, :])]
+        test_features = [features, features, features[test_index, :]]
+        test_probs = [np.ones(adj.shape[0]), np.ones(adj.shape[0])]
+        layer_sizes = [rank0, rank1, 256]
+    else:
+        raise ValueError('Invalid argument for model: ' + str(FLAGS.model))
+
+    # Define placeholders
+    placeholders = {
+        'batch': tf.placeholder(tf.int32),
+        'adj': tf.placeholder(tf.int32, shape=(num_train+1, max_degree)),
+        'adj_val': tf.placeholder(tf.float32, shape=(num_train+1, max_degree)),
+        'features': tf.placeholder(tf.float32, shape=train_features.shape),
+        'support': [tf.sparse_placeholder(tf.float32) for _ in range(num_supports)],
+        'prob': [tf.placeholder(tf.float32) for _ in range(num_supports)],
+        'features_inputs': [tf.placeholder(tf.float32, shape=(None, input_dim)) for _ in range(num_supports+1)],
+        'labels': tf.placeholder(tf.float32, shape=(None, y_train.shape[1])),
+        'labels_mask': tf.placeholder(tf.int32),
+        'dropout': tf.placeholder_with_default(0., shape=()),
+        'num_features_nonzero': tf.placeholder(tf.int32)  # helper variable for sparse dropout
+    }
+
+    # Sampling parameters shared by the sampler and model
+    with tf.variable_scope(scope):
+        w_s = glorot([features.shape[-1], 2], name='sample_weights')
+
+    # Create sampler
+    if FLAGS.sampler_device == 'cpu':
+        with tf.device('/cpu:0'):
+            sampler_tf = SamplerAdapt(placeholders, input_dim=input_dim, layer_sizes=layer_sizes, scope=scope)
+            features_sampled, support_sampled, p_u_sampled = sampler_tf.sampling(placeholders['batch'])
+    else:
+        sampler_tf = SamplerAdapt(placeholders, input_dim=input_dim, layer_sizes=layer_sizes, scope=scope)
+        features_sampled, support_sampled, p_u_sampled = sampler_tf.sampling(placeholders['batch'])
+
+    # Create model
+    model = propagator(placeholders, input_dim=input_dim, logging=True, name=scope)
+
+    # Initialize session
+    config = tf.ConfigProto(device_count={"CPU": 1},
+                            inter_op_parallelism_threads=0,
+                            intra_op_parallelism_threads=0,
+                            allow_soft_placement=True,
+                            log_device_placement=False)
+    sess = tf.Session(config=config)
+
+    # Define model evaluation function
+    def evaluate(features, support, prob_norm, labels, mask, placeholders):
+        t_test = time.time()
+        feed_dict_val = construct_feed_dict_with_prob(features, support, prob_norm, labels, mask, placeholders)
+        outs_val = sess.run([model.loss, model.accuracy], feed_dict=feed_dict_val)
+        return outs_val[0], outs_val[1], (time.time() - t_test)
+
+    # Init variables
+    sess.run(tf.global_variables_initializer(), feed_dict={placeholders['adj']: adj_train,
+                                                           placeholders['adj_val']: adj_val_train,
+                                                           placeholders['features']: train_features})
+
+    # Prepare training
+    saver = tf.train.Saver()
+    save_dir = "tmp/" + FLAGS.dataset + '_' + str(FLAGS.skip) + '_' + str(FLAGS.var) + '_' + str(FLAGS.gpu)
+    acc_val = []
+    acc_train = []
+    train_time = []
+    train_time_sample = []
+    max_acc = 0
+    t = time.time()
+    # Train model
+    for epoch in range(FLAGS.epochs):
+
+        sample_time = 0
+        t1 = time.time()
+
+        for batch in iterate_minibatches_listinputs([y_train, np.arange(num_train)], batchsize=256, shuffle=True):
+            [y_train_batch, train_batch] = batch
+
+            if sum(train_batch) < 1:
+                continue
+            ts = time.time()
+            features_inputs, supports, probs = sess.run([features_sampled, support_sampled, p_u_sampled],
+                                                        feed_dict={placeholders['batch']:train_batch})
+            sample_time += time.time()-ts
+
+            # Construct feed dictionary
+            feed_dict = construct_feed_dict_with_prob(features_inputs, supports, probs, y_train_batch, [],
+                                                      placeholders)
+            feed_dict.update({placeholders['dropout']: FLAGS.dropout})
+
+            # Training step
+            outs = sess.run([model.opt_op, model.loss, model.accuracy], feed_dict=feed_dict)
+            acc_train.append(outs[-2])
+
+        train_time_sample.append(time.time()-t1)
+        train_time.append(time.time()-t1-sample_time)
+        # Validation
+        cost, acc, duration = evaluate(test_features, test_supports, test_probs, y_test, [], placeholders)
+        acc_val.append(acc)
+        # if epoch > 50 and acc>max_acc:
+        #     max_acc = acc
+        #     saver.save(sess, save_dir + ".ckpt")
+
+        # Print results
+        print("Epoch:", '%04d' % (epoch + 1), "train_loss=", "{:.5f}".format(outs[1]),
+              "train_acc=", "{:.5f}".format(outs[2]), "val_loss=", "{:.5f}".format(cost),
+              "val_acc=", "{:.5f}".format(acc), "time=", "{:.5f}".format(train_time_sample[epoch]))
+
+    train_duration = np.mean(np.array(train_time_sample))
+    # Testing
+    # if os.path.exists(save_dir + ".ckpt.index"):
+    #     saver.restore(sess, save_dir + ".ckpt")
+    #     print('Loaded the  best ckpt.')
+    # test_cost, test_acc, test_duration = evaluate(test_features, test_supports, test_probs, y_test, [], placeholders)
+    # print("rank1 = {}".format(rank1), "rank0 = {}".format(rank0), "cost=", "{:.5f}".format(test_cost),
+    #       "accuracy=", "{:.5f}".format(test_acc), "training time per epoch=", "{:.5f}".format(train_duration))
+
+
+if __name__ == "__main__":
+
+    print("DATASET:", FLAGS.dataset)
+    main(FLAGS.rank,FLAGS.rank)
+
+File Path: sampler.py
+Content:
+from utils import *
+import scipy.sparse as sp
+from sparse_tensor_utils import *
+
+
+class Sampler(object):
+    """Sampling and Network Constructing"""
+
+    def __init__(self, placeholders, **kwargs):
+        allowed_kwargs = {'num_layers', 'input_dim', 'layer_sizes', 'scope'}
+        for kwarg in kwargs.keys():
+            assert kwarg in allowed_kwargs, 'Invalid keyword argument: ' + kwarg
+
+        self.input_dim = kwargs.get('input_dim', 1)
+        self.layer_sizes = kwargs.get('layer_sizes', [1])
+        self.scope = kwargs.get('scope', 'test_graph')
+
+        self.num_layers = len(self.layer_sizes)
+
+        with tf.variable_scope(self.scope, reuse=True):
+            self.w_s = tf.get_variable('sample_weights', [self.input_dim, 2])
+
+        self.adj = tf.Variable(placeholders['adj'], trainable=False, name="adj")
+        self.adj_val = tf.Variable(placeholders['adj_val'], trainable=False, name="adj_val")
+        self.x = tf.Variable(placeholders['features'], trainable=False, name="x")
+
+        self.num_data = tf.shape(self.adj)[0]
+
+    def sampling(self, v):
+        pass
+
+
+class SamplerAdapt(Sampler):
+    """Parameters of the sampler are adaptive"""
+
+    def sampling(self, v):
+        all_support = [[]] * (self.num_layers - 1)
+        all_p_u = [[]] * (self.num_layers - 1)
+        all_x_u = [[]] * self.num_layers
+
+        # sample top-1 layer
+        this_x_v = tf.gather(self.x, v)
+        this_adj = tf.gather(self.adj, v)
+        this_adj_val = tf.gather(self.adj_val, v)
+        all_x_u[self.num_layers - 1] = this_x_v
+
+        # top-down sampling from top-2 layer to the input layer
+        for i in range(self.num_layers - 1):
+            layer = self.num_layers - i - 2
+
+            u_sampled, support, p_u = self.one_layer_sampling(adj=this_adj, adj_val=this_adj_val, x_v=this_x_v,
+                                                              output_size=self.layer_sizes[layer])
+
+            this_x_v = tf.gather(self.x, u_sampled)
+            this_adj = tf.gather(self.adj, u_sampled)
+            this_adj_val = tf.gather(self.adj_val, u_sampled)
+
+            all_x_u[layer] = this_x_v
+            all_support[layer] = support
+            all_p_u[layer] = p_u
+
+        return all_x_u, all_support, all_p_u
+
+    def one_layer_sampling(self, adj, adj_val, x_v, output_size):
+        """layer wise sampling """
+
+        support, u = from_adjlist(adj, adj_val)
+        x_u = tf.gather(self.x, u)
+        h_v = tf.reduce_sum(tf.matmul(x_v, tf.expand_dims(self.w_s[:, 1], -1)))
+        h_u = tf.matmul(x_u, tf.expand_dims(self.w_s[:, 0], -1))
+        attention = tf.reshape(1 / tf.cast(output_size, tf.float32) * (tf.nn.relu(h_v + h_u) + 1), [-1])
+        g_u = tf.reshape(tf.nn.relu(h_u) + 1, [-1])
+
+        p1 = tf.cast(tf.sqrt(tf.sparse_reduce_sum(tf.square(support), axis=0)), dtype=tf.float32) * attention * g_u
+        p1 = p1 / tf.reduce_sum(p1)
+
+        samples = tf.cast(tf.multinomial([tf.log(p1)], output_size), tf.int64)
+
+        u_sampled = tf.gather(u, samples[0])
+        p_u = tf.gather(p1, samples[0])
+        support = SparsePlus(support)
+        support_sampled = support.gather_columns(samples[0])
+
+        return u_sampled, support_sampled, p_u
+
+
+
+File Path: sparse_tensor_utils.py
+Content:
+import tensorflow as tf
+import numpy as np
+
+class SparsePlus(object):
+    """A wrapper around the tf sparsetensor with more functions implemented"""
+    def __init__(self, sparse_tensor):
+        self.sparse_tensor = sparse_tensor
+        self.rows = self.sparse_tensor.indices[:, 0]
+        self.cols = self.sparse_tensor.indices[:, 1]
+        self.values = self.sparse_tensor.values
+        self.dense_shape = self.sparse_tensor.dense_shape
+
+    def gather_columns(self, needed_col_ids):
+        """Gather needed columns from the sparsetensor"""
+        support = gather_columns(self.sparse_tensor, needed_col_ids)
+
+        return support
+
+    def gather_rows(self, needed_row_ids):
+        """Gather needed rows from the sparsetensor"""
+        sp_trans = tf.sparse_transpose(self.sparse_tensor)
+        sp_trans_gather = gather_columns(sp_trans, needed_row_ids)
+        support = tf.sparse_transpose(sp_trans_gather)
+
+        return support
+
+    def nonzero_columns(self, out_idx=tf.int32):
+        """Return non-zero columns"""
+        columns, _ = tf.unique(self.cols, out_idx=out_idx)
+
+        return columns
+
+
+def gather_columns(support, needed_col_ids):
+    """Gather needed columns from the sparse support matrix"""
+    needed_col_ids = tf.cast(needed_col_ids, tf.int64)
+    rows = support.indices[:,0]
+    cols = support.indices[:,1]
+    values = support.values
+    dense_shape = support.dense_shape
+
+    num_samples = tf.size(rows)
+    connect = tf.equal(tf.reshape(cols, [-1, 1]), tf.reshape(needed_col_ids, [1, -1]))
+    partitions = tf.cast(tf.reduce_any(connect, axis=1), tf.int32)
+    samples_to_gather = tf.cast(tf.dynamic_partition(tf.range(num_samples), partitions, 2)[1], tf.int64)
+
+    new_rows = tf.gather(rows, samples_to_gather)
+    new_cols = tf.gather(tf.argmax(tf.cast(connect, tf.int64), axis=1), samples_to_gather)
+    new_values = tf.gather(values, samples_to_gather)
+    dense_shape = tf.stack((dense_shape[0], tf.size(needed_col_ids, out_type=tf.int64)))
+
+    support = tf.SparseTensor(indices=tf.stack((new_rows, new_cols), axis=1), values=new_values, dense_shape=dense_shape)
+
+    return support
+
+
+def from_adjlist(adj, adj_val):
+    """Transfer adj-list format to sparsetensor"""
+    u_sampled, index = tf.unique(tf.reshape(adj, [-1]), out_idx=tf.int64)
+
+    row = tf.cast(tf.range(tf.size(index)) // tf.shape(adj)[1], tf.int64)
+    col = index
+    values = tf.reshape(adj_val, [-1])
+    indices = tf.stack([row, col], axis=1)
+    dense_shape = tf.cast(tf.stack((tf.shape(adj)[0], tf.size(u_sampled))), tf.int64)
+
+    support = tf.SparseTensor(indices=indices, values=values, dense_shape=dense_shape)
+
+    return support, u_sampled
+
+
+def compute_adjlist(sp_adj, max_degree):
+    """Transfer sparse adjacent matrix to adj-list format"""
+    num_data = sp_adj.shape[0]
+    adj = num_data+np.zeros((num_data+1, max_degree), dtype=np.int32)
+    adj_val = np.zeros((num_data+1, max_degree), dtype=np.float32)
+
+    for v in range(num_data):
+        neighbors = np.nonzero(sp_adj[v, :])[1]
+        len_neighbors = len(neighbors)
+        if len_neighbors > max_degree:
+            neighbors = np.random.choice(neighbors, max_degree, replace=False)
+            adj[v] = neighbors
+            adj_val[v, :len_neighbors] = sp_adj[v, neighbors].toarray()
+        else:
+            adj[v, :len_neighbors] = neighbors
+            adj_val[v, :len_neighbors] = sp_adj[v, neighbors].toarray()
+
+    return adj, adj_val
+
+File Path: train.py
+Content:
+from __future__ import division
+from __future__ import print_function
+
+import time
+import tensorflow as tf
+
+from utils import *
+from models import GCN, MLP
+
+# Set random seed
+seed = 123
+np.random.seed(seed)
+tf.set_random_seed(seed)
+
+# Settings
+flags = tf.app.flags
+FLAGS = flags.FLAGS
+flags.DEFINE_string('dataset', 'pubmed', 'Dataset string.')  # 'cora', 'citeseer', 'pubmed'
+flags.DEFINE_string('model', 'gcn', 'Model string.')  # 'gcn', 'gcn_cheby', 'dense'
+flags.DEFINE_float('learning_rate', 0.01, 'Initial learning rate.')
+flags.DEFINE_integer('epochs', 200, 'Number of epochs to train.')
+flags.DEFINE_integer('hidden1', 16, 'Number of units in hidden layer 1.')
+flags.DEFINE_float('dropout', 0.5, 'Dropout rate (1 - keep probability).')
+flags.DEFINE_float('weight_decay', 5e-4, 'Weight for L2 loss on embedding matrix.')
+flags.DEFINE_integer('early_stopping', 10, 'Tolerance for early stopping (# of epochs).')
+flags.DEFINE_integer('max_degree', 3, 'Maximum Chebyshev polynomial degree.')
+
+# Load data
+adj, features, y_train, y_val, y_test, train_mask, val_mask, test_mask = load_data(FLAGS.dataset)
+
+# Some preprocessing
+features = preprocess_features(features)
+if FLAGS.model == 'gcn':
+    support = [preprocess_adj(adj)]
+    num_supports = 1
+    model_func = GCN
+elif FLAGS.model == 'gcn_cheby':
+    support = chebyshev_polynomials(adj, FLAGS.max_degree)
+    num_supports = 1 + FLAGS.max_degree
+    model_func = GCN
+elif FLAGS.model == 'dense':
+    support = [preprocess_adj(adj)]  # Not used
+    num_supports = 1
+    model_func = MLP
+else:
+    raise ValueError('Invalid argument for model: ' + str(FLAGS.model))
+
+# Define placeholders
+placeholders = {
+    'support': [tf.sparse_placeholder(tf.float32) for _ in range(num_supports)],
+    'features': tf.sparse_placeholder(tf.float32, shape=tf.constant(features[2], dtype=tf.int64)),
+    'labels': tf.placeholder(tf.float32, shape=(None, y_train.shape[1])),
+    'labels_mask': tf.placeholder(tf.int32),
+    'dropout': tf.placeholder_with_default(0., shape=()),
+    'num_features_nonzero': tf.placeholder(tf.int32)  # helper variable for sparse dropout
+}
+
+# Create model
+model = model_func(placeholders, input_dim=features[2][1], logging=True)
+print(adj.shape[0])
+
+# Initialize session
+sess = tf.Session()
+
+
+# Define model evaluation function
+def evaluate(features, support, labels, mask, placeholders):
+    t_test = time.time()
+    feed_dict_val = construct_feed_dict(features, support, labels, mask, placeholders)
+    outs_val = sess.run([model.loss, model.accuracy], feed_dict=feed_dict_val)
+    return outs_val[0], outs_val[1], (time.time() - t_test)
+
+
+# Init variables
+sess.run(tf.global_variables_initializer())
+
+cost_val = []
+t_start = time.time()
+# Train model
+for epoch in range(FLAGS.epochs):
+
+    t = time.time()
+    # Construct feed dictionary
+    feed_dict = construct_feed_dict(features, support, y_train, train_mask, placeholders)
+    feed_dict.update({placeholders['dropout']: FLAGS.dropout})
+
+    # Training step
+    outs = sess.run([model.opt_op, model.loss, model.accuracy], feed_dict=feed_dict)
+
+    # Validation
+    cost, acc, duration = evaluate(features, support, y_val, val_mask, placeholders)
+    cost_val.append(cost)
+
+    # Print results
+    print("Epoch:", '%04d' % (epoch + 1), "train_loss=", "{:.5f}".format(outs[1]),
+          "train_acc=", "{:.5f}".format(outs[2]), "val_loss=", "{:.5f}".format(cost),
+          "val_acc=", "{:.5f}".format(acc), "time=", "{:.5f}".format(time.time() - t))
+
+    # if epoch % 5 == 0:
+    #     # Validation
+    #     test_cost, test_acc, test_duration = evaluate(features, support, y_test, test_mask, placeholders)
+    #     print("training time by far=", "{:.5f}".format(time.time() - t_start),
+    #           "epoch = {}".format(epoch + 1),
+    #           "cost=", "{:.5f}".format(test_cost),
+    #           "accuracy=", "{:.5f}".format(test_acc))
+
+    #if epoch > FLAGS.early_stopping and cost_val[-1] > np.mean(cost_val[-(FLAGS.early_stopping+1):-1]):
+    #    print("Early stopping...")
+    #    break
+
+# print("Optimization Finished!")
+train_duration = time.time()-t_start
+# Testing
+test_cost, test_acc, test_duration = evaluate(features, support, y_test, test_mask, placeholders)
+print("Original test set results:", "cost=", "{:.5f}".format(test_cost),
+      "accuracy=", "{:.5f}".format(test_acc), "training time =", "{:.5f}".format(train_duration),
+      "training time per epoch=", "{:.5f}".format(train_duration/(epoch+1)),
+      "test time=", "{:.5f}".format(test_duration))
+
+File Path: transfer_Graph.py
+Content:
+from utils import *
+
+def transferRedditDataFormat(dataset_dir, dataset):
+    G = json_graph.node_link_graph(json.load(open(dataset_dir + dataset + "-G.json")))
+    labels = json.load(open(dataset_dir + dataset + "-class_map.json"))
+
+    if isinstance(G.nodes()[0], int):
+        conversion = lambda n : int(n)
+    else:
+        conversion = lambda n : n
+    if isinstance(list(labels.values())[0], list):
+        lab_conversion = lambda n : n
+    else:
+        lab_conversion = lambda n : int(n)
+
+    labels = {conversion(k):lab_conversion(v) for k,v in labels.items()}
+
+
+    train_ids = [n for n in G.nodes() if not G.node[n]['val'] and not G.node[n]['test']]
+    test_ids = [n for n in G.nodes() if G.node[n]['test']]
+    val_ids = [n for n in G.nodes() if G.node[n]['val']]
+    train_labels = [labels[i] for i in train_ids]
+    print(len(train_labels[0]))
+    test_labels = [labels[i] for i in test_ids]
+    val_labels = [labels[i] for i in val_ids]
+    feats = np.load(dataset_dir + dataset + "-feats.npy")
+    ## Logistic gets thrown off by big counts, so log transform num comments and score
+    feats[:, 0] = np.log(feats[:, 0] + 1.0)
+    feats[:, 1] = np.log(feats[:, 1] - min(np.min(feats[:, 1]), -1))
+    feat_id_map = json.load(open(dataset_dir + dataset + "-id_map.json"))
+    feat_id_map = {conversion(id):int(val) for id, val in feat_id_map.iteritems()}
+    #feat_id_map = {conversion(k):int(v) for k,v in feat_id_map.items()}
+    # train_feats = feats[[feat_id_map[id] for id in train_ids]]
+    # test_feats = feats[[feat_id_map[id] for id in test_ids]]
+
+    numNode = len(feat_id_map)
+    adj = sp.lil_matrix((numNode,numNode))
+    #adj = sp.csr_matrix((numNode,numNode))
+    for edge in G.edges():
+        adj[feat_id_map[edge[0]], feat_id_map[edge[1]]] = 1
+    sp.save_npz(dataset_dir+dataset+"_adj", adj.tocsr())
+
+    train_index = [feat_id_map[id] for id in train_ids]
+    val_index = [feat_id_map[id] for id in val_ids]
+    test_index = [feat_id_map[id] for id in test_ids]
+    np.savez(dataset_dir+dataset, feats = feats, y_train=train_labels, y_val=val_labels, y_test = test_labels, train_index = train_index,
+            val_index=val_index, test_index = test_index)
+
+
+if __name__=="__main__":
+
+    data_dir = './data/'
+    dataset= 'reddit'  # 'ppi'
+
+    transferRedditDataFormat(data_dir, dataset)
+
+File Path: utils.py
+Content:
+import numpy as np
+import pickle as pkl
+import networkx as nx
+import scipy.sparse as sp
+from scipy.sparse.linalg.eigen.arpack import eigsh
+import sys
+from scipy.sparse.linalg import norm as sparsenorm
+from scipy.linalg import qr
+from sparse_tensor_utils import *
+import json
+from networkx.readwrite import json_graph
+
+
+def parse_index_file(filename):
+    """Parse index file."""
+    index = []
+    for line in open(filename):
+        index.append(int(line.strip()))
+    return index
+
+
+def sample_mask(idx, l):
+    """Create mask."""
+    mask = np.zeros(l)
+    mask[idx] = 1
+    return np.array(mask, dtype=np.bool)
+
+#
+# def calc_f1(y_true, y_pred):
+#     y_true = np.argmax(y_true, axis=1)
+#     y_pred = np.argmax(y_pred, axis=1)
+#     return f1_score(y_true, y_pred, average="micro"), f1_score(y_true, y_pred, average="macro")
+#
+
+#
+# def load_data(dataset_str):
+#     """Load data."""
+#     names = ['x', 'y', 'tx', 'ty', 'allx', 'ally', 'graph']
+#     objects = []
+#     for i in range(len(names)):
+#         with open("data/ind.{}.{}".format(dataset_str, names[i]), 'rb') as f:
+#             if sys.version_info > (3, 0):
+#                 objects.append(pkl.load(f, encoding='latin1'))
+#             else:
+#                 objects.append(pkl.load(f))
+#
+#     x, y, tx, ty, allx, ally, graph = tuple(objects)
+#     test_idx_reorder = parse_index_file("data/ind.{}.test.index".format(dataset_str))
+#     test_idx_range = np.sort(test_idx_reorder)
+#
+#     if dataset_str == 'citeseer':
+#         # Fix citeseer dataset (there are some isolated nodes in the graph)
+#         # Find isolated nodes, add them as zero-vecs into the right position
+#         test_idx_range_full = range(min(test_idx_reorder), max(test_idx_reorder)+1)
+#         tx_extended = sp.lil_matrix((len(test_idx_range_full), x.shape[1]))
+#         tx_extended[test_idx_range-min(test_idx_range), :] = tx
+#         tx = tx_extended
+#         ty_extended = np.zeros((len(test_idx_range_full), y.shape[1]))
+#         ty_extended[test_idx_range-min(test_idx_range), :] = ty
+#         ty = ty_extended
+#
+#     features = sp.vstack((allx, tx)).tolil()
+#     features[test_idx_reorder, :] = features[test_idx_range, :]
+#     adj = nx.adjacency_matrix(nx.from_dict_of_lists(graph))
+#
+#     labels = np.vstack((ally, ty))
+#     labels[test_idx_reorder, :] = labels[test_idx_range, :]
+#
+#     idx_test = test_idx_range.tolist()
+#     idx_train = range(len(y))
+#     idx_val = range(len(y), len(y)+500)
+#
+#     train_mask = sample_mask(idx_train, labels.shape[0])
+#     val_mask = sample_mask(idx_val, labels.shape[0])
+#     test_mask = sample_mask(idx_test, labels.shape[0])
+#
+#     y_train = np.zeros(labels.shape)
+#     y_val = np.zeros(labels.shape)
+#     y_test = np.zeros(labels.shape)
+#     y_train[train_mask, :] = labels[train_mask, :]
+#     y_val[val_mask, :] = labels[val_mask, :]
+#     y_test[test_mask, :] = labels[test_mask, :]
+#
+#     return adj, features, y_train, y_val, y_test, train_mask, val_mask, test_mask
+#
+
+
+def load_data(dataset_str):
+    """Load data."""
+    names = ['x', 'y', 'tx', 'ty', 'allx', 'ally', 'graph']
+    objects = []
+    for i in range(len(names)):
+        with open("data/ind.{}.{}".format(dataset_str, names[i]), 'rb') as f:
+            if sys.version_info > (3, 0):
+                objects.append(pkl.load(f, encoding='latin1'))
+            else:
+                objects.append(pkl.load(f))
+
+    x, y, tx, ty, allx, ally, graph = tuple(objects)
+    test_idx_reorder = parse_index_file("data/ind.{}.test.index".format(dataset_str))
+    test_idx_range = np.sort(test_idx_reorder)
+
+    if dataset_str == 'citeseer':
+        # Fix citeseer dataset (there are some isolated nodes in the graph)
+        # Find isolated nodes, add them as zero-vecs into the right position
+        test_idx_range_full = range(min(test_idx_reorder), max(test_idx_reorder)+1)
+        tx_extended = sp.lil_matrix((len(test_idx_range_full), x.shape[1]))
+        tx_extended[test_idx_range-min(test_idx_range), :] = tx
+        tx = tx_extended
+        ty_extended = np.zeros((len(test_idx_range_full), y.shape[1]))
+        ty_extended[test_idx_range-min(test_idx_range), :] = ty
+        ty = ty_extended
+
+    features = sp.vstack((allx, tx)).tolil()
+    features[test_idx_reorder, :] = features[test_idx_range, :]
+    adj = nx.adjacency_matrix(nx.from_dict_of_lists(graph))
+
+    labels = np.vstack((ally, ty))
+    labels[test_idx_reorder, :] = labels[test_idx_range, :]
+
+    idx_test = test_idx_range.tolist()
+    idx_train = range(len(ally)-500)
+    idx_val = range(len(ally)-500, len(ally))
+    #idx_train = range(len(y))
+    #idx_val = range(len(y), len(y)+500)
+
+    train_mask = sample_mask(idx_train, labels.shape[0])
+    val_mask = sample_mask(idx_val, labels.shape[0])
+    test_mask = sample_mask(idx_test, labels.shape[0])
+
+    y_train = np.zeros(labels.shape)
+    y_val = np.zeros(labels.shape)
+    y_test = np.zeros(labels.shape)
+    y_train[train_mask, :] = labels[train_mask, :]
+    y_val[val_mask, :] = labels[val_mask, :]
+    y_test[test_mask, :] = labels[test_mask, :]
+
+    return adj, features, y_train, y_val, y_test, train_mask, val_mask, test_mask
+
+def load_data_original(dataset_str):
+    """Load data."""
+    names = ['x', 'y', 'tx', 'ty', 'allx', 'ally', 'graph']
+    objects = []
+    for i in range(len(names)):
+        with open("data/ind.{}.{}".format(dataset_str, names[i]), 'rb') as f:
+            if sys.version_info > (3, 0):
+                objects.append(pkl.load(f, encoding='latin1'))
+            else:
+                objects.append(pkl.load(f))
+
+    x, y, tx, ty, allx, ally, graph = tuple(objects)
+    test_idx_reorder = parse_index_file("data/ind.{}.test.index".format(dataset_str))
+    test_idx_range = np.sort(test_idx_reorder)
+
+    if dataset_str == 'citeseer':
+        # Fix citeseer dataset (there are some isolated nodes in the graph)
+        # Find isolated nodes, add them as zero-vecs into the right position
+        test_idx_range_full = range(min(test_idx_reorder), max(test_idx_reorder)+1)
+        tx_extended = sp.lil_matrix((len(test_idx_range_full), x.shape[1]))
+        tx_extended[test_idx_range-min(test_idx_range), :] = tx
+        tx = tx_extended
+        ty_extended = np.zeros((len(test_idx_range_full), y.shape[1]))
+        ty_extended[test_idx_range-min(test_idx_range), :] = ty
+        ty = ty_extended
+
+    features = sp.vstack((allx, tx)).tolil()
+    features[test_idx_reorder, :] = features[test_idx_range, :]
+    adj = nx.adjacency_matrix(nx.from_dict_of_lists(graph))
+
+    labels = np.vstack((ally, ty))
+    labels[test_idx_reorder, :] = labels[test_idx_range, :]
+
+    idx_test = test_idx_range.tolist()
+    idx_train = range(len(y))
+    idx_val = range(len(y), len(y)+500)
+
+    train_mask = sample_mask(idx_train, labels.shape[0])
+    val_mask = sample_mask(idx_val, labels.shape[0])
+    test_mask = sample_mask(idx_test, labels.shape[0])
+
+    y_train = np.zeros(labels.shape)
+    y_val = np.zeros(labels.shape)
+    y_test = np.zeros(labels.shape)
+    y_train[train_mask, :] = labels[train_mask, :]
+    y_val[val_mask, :] = labels[val_mask, :]
+    y_test[test_mask, :] = labels[test_mask, :]
+
+    return adj, features, y_train, y_val, y_test, train_mask, val_mask, test_mask
+
+
+def sparse_to_tuple(sparse_mx):
+    """Convert sparse matrix to tuple representation."""
+    def to_tuple(mx):
+        if not sp.isspmatrix_coo(mx):
+            mx = mx.tocoo()
+        coords = np.vstack((mx.row, mx.col)).transpose()
+        values = mx.data
+        shape = mx.shape
+        return coords, values, shape
+
+    if isinstance(sparse_mx, list):
+        for i in range(len(sparse_mx)):
+            sparse_mx[i] = to_tuple(sparse_mx[i])
+    else:
+        sparse_mx = to_tuple(sparse_mx)
+
+    return sparse_mx
+
+
+def nontuple_preprocess_features(features):
+    """Row-normalize feature matrix and convert to tuple representation"""
+    rowsum = np.array(features.sum(1))
+    r_inv = np.power(rowsum, -1).flatten()
+    r_inv[np.isinf(r_inv)] = 0.
+    r_mat_inv = sp.diags(r_inv)
+    features = r_mat_inv.dot(features)
+    return features
+
+
+def preprocess_features(features):
+    """Row-normalize feature matrix and convert to tuple representation"""
+    rowsum = np.array(features.sum(1))
+    r_inv = np.power(rowsum, -1).flatten()
+    r_inv[np.isinf(r_inv)] = 0.
+    r_mat_inv = sp.diags(r_inv)
+    features = r_mat_inv.dot(features)
+    return sparse_to_tuple(features)
+
+
+def normalize_adj(adj):
+    """Symmetrically normalize adjacency matrix."""
+    adj = sp.coo_matrix(adj)
+    rowsum = np.array(adj.sum(1))
+    d_inv_sqrt = np.power(rowsum, -0.5).flatten()
+    d_inv_sqrt[np.isinf(d_inv_sqrt)] = 0.
+    d_mat_inv_sqrt = sp.diags(d_inv_sqrt)
+    return adj.dot(d_mat_inv_sqrt).transpose().dot(d_mat_inv_sqrt).tocoo()
+
+def nontuple_preprocess_adj(adj):
+    adj_normalized = normalize_adj(sp.eye(adj.shape[0]) + adj)
+    # adj_normalized = sp.eye(adj.shape[0]) + normalize_adj(adj)
+    return adj_normalized.tocsr()
+
+def column_prop(adj):
+    #column_norm = sparsenorm(adj, ord=1, axis=0)
+    column_norm = sparsenorm(adj, axis=0)
+    #column_norm = pow(sparsenorm(adj, axis=0),2)
+    norm_sum = sum(column_norm)
+    return column_norm/norm_sum
+
+def mix_prop(adj, features, sparseinputs=False):
+    adj_column_norm = sparsenorm(adj, axis=0)
+    if sparseinputs:
+        features_row_norm = sparsenorm(features, axis=1)
+    else:
+        features_row_norm = np.linalg.norm(features, axis=1)
+    mix_norm = adj_column_norm*features_row_norm
+
+    norm_sum = sum(mix_norm)
+    return mix_norm / norm_sum
+
+
+def preprocess_adj(adj):
+    """Preprocessing of adjacency matrix for simple GCN model and conversion to tuple representation."""
+    # adj_appr = np.array(sp.csr_matrix.todense(adj))
+    # # adj_appr = dense_lanczos(adj_appr, 100)
+    # adj_appr = dense_RandomSVD(adj_appr, 100)
+    # if adj_appr.sum(1).min()<0:
+    #     adj_appr = adj_appr- (adj_appr.sum(1).min()-0.5)*sp.eye(adj_appr.shape[0])
+    # else:
+    #     adj_appr = adj_appr + sp.eye(adj_appr.shape[0])
+    # adj_normalized = normalize_adj(adj_appr)
+
+    # adj_normalized = normalize_adj(adj+sp.eye(adj.shape[0]))
+    # adj_appr = np.array(sp.coo_matrix.todense(adj_normalized))
+    # # adj_normalized = dense_RandomSVD(adj_appr,100)
+    # adj_normalized = dense_lanczos(adj_appr, 100)
+
+
+    adj_normalized = normalize_adj(sp.eye(adj.shape[0]) + adj)
+    # adj_normalized = sp.eye(adj.shape[0]) + normalize_adj(adj)
+    return sparse_to_tuple(adj_normalized)
+
+from lanczos import lanczos
+def dense_lanczos(A,K):
+    q = np.random.randn(A.shape[0], )
+    Q, sigma = lanczos(A, K, q)
+    A2 = np.dot(Q[:,:K], np.dot(sigma[:K,:K], Q[:,:K].T))
+    return sp.csr_matrix(A2)
+
+def sparse_lanczos(A,k):
+    q = sp.random(A.shape[0],1)
+    n = A.shape[0]
+    Q = sp.lil_matrix(np.zeros((n,k+1)))
+    A = sp.lil_matrix(A)
+
+    Q[:,0] = q/sparsenorm(q)
+
+    alpha = 0
+    beta = 0
+
+    for i in range(k):
+      if i == 0:
+        q = A*Q[:,i]
+      else:
+        q = A*Q[:,i] - beta*Q[:,i-1]
+      alpha = q.T*Q[:,i]
+      q = q - Q[:,i]*alpha
+      q = q - Q[:,:i]*Q[:,:i].T*q # full reorthogonalization
+      beta = sparsenorm(q)
+      Q[:,i+1] = q/beta
+      print(i)
+
+    Q = Q[:,:k]
+
+    Sigma = Q.T*A*Q
+    A2 = Q[:,:k]*Sigma[:k,:k]*Q[:,:k].T
+    return A2
+    # return Q, Sigma
+
+def dense_RandomSVD(A,K):
+    G = np.random.randn(A.shape[0],K)
+    B = np.dot(A,G)
+    Q,R =qr(B,mode='economic')
+    M = np.dot(Q, np.dot(Q.T, A))
+    return sp.csr_matrix(M)
+
+
+def construct_feed_dict(features, supports, labels, labels_mask, placeholders):
+    """Construct feed dictionary."""
+    feed_dict = dict()
+    feed_dict.update({placeholders['labels']: labels})
+    feed_dict.update({placeholders['labels_mask']: labels_mask})
+    feed_dict.update({placeholders['features']: features})
+    feed_dict.update({placeholders['support'][i]: supports[i] for i in range(len(supports))})
+    feed_dict.update({placeholders['num_features_nonzero']: features[1].shape})
+    return feed_dict
+
+def construct_feed_dict_with_prob(features_inputs, supports, probs, labels, labels_mask, placeholders):
+    """Construct feed dictionary with adding sampling prob."""
+    feed_dict = dict()
+    feed_dict.update({placeholders['labels']: labels})
+    feed_dict.update({placeholders['labels_mask']: labels_mask})
+    feed_dict.update({placeholders['features_inputs'][i]: features_inputs[i] for i in range(len(features_inputs))})
+    feed_dict.update({placeholders['support'][i]: supports[i] for i in range(len(supports))})
+    feed_dict.update({placeholders['prob'][i]: probs[i] for i in range(len(probs))})
+    #feed_dict.update({placeholders['prob_norm'][i]: probs_norm[i] for i in range(len(probs_norm))})
+    feed_dict.update({placeholders['num_features_nonzero']: features_inputs[1].shape})
+    return feed_dict
+
+
+def chebyshev_polynomials(adj, k):
+    """Calculate Chebyshev polynomials up to order k. Return a list of sparse matrices (tuple representation)."""
+    print("Calculating Chebyshev polynomials up to order {}...".format(k))
+
+    adj_normalized = normalize_adj(adj)
+    laplacian = sp.eye(adj.shape[0]) - adj_normalized
+    largest_eigval, _ = eigsh(laplacian, 1, which='LM')
+    scaled_laplacian = (2. / largest_eigval[0]) * laplacian - sp.eye(adj.shape[0])
+
+    t_k = list()
+    t_k.append(sp.eye(adj.shape[0]))
+    t_k.append(scaled_laplacian)
+
+    def chebyshev_recurrence(t_k_minus_one, t_k_minus_two, scaled_lap):
+        s_lap = sp.csr_matrix(scaled_lap, copy=True)
+        return 2 * s_lap.dot(t_k_minus_one) - t_k_minus_two
+
+    for i in range(2, k+1):
+        t_k.append(chebyshev_recurrence(t_k[-1], t_k[-2], scaled_laplacian))
+
+    return sparse_to_tuple(t_k)
+
+
+def iterate_minibatches_listinputs(inputs, batchsize, shuffle=False):
+    assert inputs is not None
+    numSamples = inputs[0].shape[0]
+    indices = np.arange(numSamples)
+    if shuffle:
+        np.random.shuffle(indices)
+    for start_idx in range(0, numSamples - batchsize + 1, batchsize):
+        if shuffle:
+            excerpt = indices[start_idx:start_idx + batchsize]
+        else:
+            excerpt = slice(start_idx, start_idx + batchsize)
+        yield [input[excerpt] for input in inputs]
+
+def loadRedditFromG(dataset_dir, inputfile):
+    f= open(dataset_dir+inputfile)
+    objects = []
+    for _ in range(pkl.load(f)):
+        objects.append(pkl.load(f))
+    adj, train_labels, val_labels, test_labels, train_index, val_index, test_index = tuple(objects)
+    feats = np.load(dataset_dir + "/reddit-feats.npy")
+    return sp.csr_matrix(adj), sp.lil_matrix(feats), train_labels, val_labels, test_labels, train_index, val_index, test_index
+
+
+def loadRedditFromNPZ(dataset_dir):
+    adj = sp.load_npz(dataset_dir+"_adj.npz")
+    data = np.load(dataset_dir+".npz")
+
+    return adj, data['feats'], data['y_train'], data['y_val'], data['y_test'], data['train_index'], data['val_index'], data['test_index']
+
+
+
+def transferRedditDataFormat(dataset_dir, output_file):
+    G = json_graph.node_link_graph(json.load(open(dataset_dir + "-G.json")))
+    labels = json.load(open(dataset_dir + "-class_map.json"))
+
+    train_ids = [n for n in G.nodes() if not G.node[n]['val'] and not G.node[n]['test']]
+    test_ids = [n for n in G.nodes() if G.node[n]['test']]
+    val_ids = [n for n in G.nodes() if G.node[n]['val']]
+    train_labels = [labels[i] for i in train_ids]
+    test_labels = [labels[i] for i in test_ids]
+    val_labels = [labels[i] for i in val_ids]
+    feats = np.load(dataset_dir + "-feats.npy")
+    ## Logistic gets thrown off by big counts, so log transform num comments and score
+    feats[:, 0] = np.log(feats[:, 0] + 1.0)
+    feats[:, 1] = np.log(feats[:, 1] - min(np.min(feats[:, 1]), -1))
+    feat_id_map = json.load(open(dataset_dir + "-id_map.json"))
+    feat_id_map = {id: val for id, val in feat_id_map.iteritems()}
+
+    # train_feats = feats[[feat_id_map[id] for id in train_ids]]
+    # test_feats = feats[[feat_id_map[id] for id in test_ids]]
+
+    # numNode = len(feat_id_map)
+    # adj = sp.lil_matrix(np.zeros((numNode,numNode)))
+    # for edge in G.edges():
+    #     adj[feat_id_map[edge[0]], feat_id_map[edge[1]]] = 1
+
+    train_index = [feat_id_map[id] for id in train_ids]
+    val_index = [feat_id_map[id] for id in val_ids]
+    test_index = [feat_id_map[id] for id in test_ids]
+    np.savez(output_file, feats = feats, y_train=train_labels, y_val=val_labels, y_test = test_labels, train_index = train_index,
+             val_index=val_index, test_index = test_index)
+
+
+def transferLabel2Onehot(labels, N):
+    y = np.zeros((len(labels),N))
+    for i in range(len(labels)):
+        pos = labels[i]
+        y[i,pos] =1
+    return y
+
+def construct_feeddict_forMixlayers(AXfeatures, support, labels, placeholders):
+    feed_dict = dict()
+    feed_dict.update({placeholders['labels']: labels})
+    feed_dict.update({placeholders['AXfeatures']: AXfeatures})
+    feed_dict.update({placeholders['support']: support})
+    feed_dict.update({placeholders['num_features_nonzero']: AXfeatures[1].shape})
+    return feed_dict
+
+
+def prepare_pubmed(dataset, max_degree):
+
+    adj, features, y_train, y_val, y_test, train_mask, val_mask, test_mask = load_data(dataset)
+
+    train_index = np.where(train_mask)[0]
+    adj_train = adj[train_index, :][:, train_index]
+    y_train = y_train[train_index]
+    val_index = np.where(val_mask)[0]
+    y_val = y_val[val_index]
+    test_index = np.where(test_mask)[0]
+    y_test = y_test[test_index]
+
+    num_train = adj_train.shape[0]
+    input_dim = features.shape[1]
+
+    features = nontuple_preprocess_features(features).todense()
+    train_features = features[train_index]
+
+    norm_adj_train = nontuple_preprocess_adj(adj_train)
+    norm_adj = nontuple_preprocess_adj(adj)
+
+    if dataset == 'pubmed':
+        norm_adj = 1*sp.diags(np.ones(norm_adj.shape[0])) + norm_adj
+        norm_adj_train = 1*sp.diags(np.ones(num_train)) + norm_adj_train
+
+    # adj_train, adj_val_train = norm_adj_train, norm_adj_train
+    adj_train, adj_val_train = compute_adjlist(norm_adj_train, max_degree)
+    train_features = np.concatenate((train_features, np.zeros((1, input_dim))))
+
+    return norm_adj, adj_train, adj_val_train, features, train_features, y_train, y_test, test_index
+
+
+def prepare_reddit(max_degree):
+
+    adj, features, y_train, y_val, y_test, train_index, val_index, test_index = loadRedditFromNPZ("data/reddit")
+    adj = adj + adj.T
+
+    y_train = transferLabel2Onehot(y_train, 41)
+    y_val = transferLabel2Onehot(y_val, 41)
+    y_test = transferLabel2Onehot(y_test, 41)
+
+    features = sp.lil_matrix(features)
+    adj_train = adj[train_index, :][:, train_index]
+    num_train = adj_train.shape[0]
+    input_dim = features.shape[1]
+
+    mask = []
+
+    norm_adj_train = nontuple_preprocess_adj(adj_train)
+    norm_adj = nontuple_preprocess_adj(adj)
+
+    # Some preprocessing
+    features = nontuple_preprocess_features(features).todense()
+    train_features = norm_adj_train.dot(features[train_index])
+    features = norm_adj.dot(features)
+
+    adj_train, adj_val_train = compute_adjlist(norm_adj_train, max_degree)
+    train_features = np.concatenate((train_features, np.zeros((1, input_dim))))
+
+    return norm_adj, adj_train, adj_val_train, features, train_features, y_train, y_test, test_index
+
+
+
+Output:
+{
+    "experimental_code": "import tensorflow as tf\nimport numpy as np\nimport scipy.sparse as sp\nimport pickle as pkl\nimport networkx as nx\nimport sys\nfrom scipy.sparse.linalg import norm as sparsenorm\n\n\ndef get_layer_uid(layer_name=''):\n    \"\"\"Helper function, assigns unique layer IDs.\"\"\"\n    _LAYER_UIDS = {}\n    if layer_name not in _LAYER_UIDS:\n        _LAYER_UIDS[layer_name] = 1\n        return 1\n    else:\n        _LAYER_UIDS[layer_name] += 1\n        return _LAYER_UIDS[layer_name]\n\n\ndef glorot(shape, name=None):\n    \"\"\"Glorot & Bengio (AISTATS 2010) init.\"\"\"\n    init_range = np.sqrt(6.0/(shape[0]+shape[1]))\n    initial = tf.random_uniform_initializer(minval=-init_range, maxval=init_range, dtype=tf.float32)\n    return tf.get_variable(name, shape, initializer=initial)\n\n\ndef zeros(shape, name=None):\n    \"\"\"All zeros.\"\"\"\n    initial = tf.zeros(shape, dtype=tf.float32)\n    return tf.Variable(initial, name=name)\n\n\ndef sparse_dropout(x, keep_prob, noise_shape):\n    \"\"\"Dropout for sparse tensors.\"\"\"\n    random_tensor = keep_prob\n    random_tensor += tf.random_uniform(noise_shape)\n    dropout_mask = tf.cast(tf.floor(random_tensor), dtype=tf.bool)\n    pre_out = tf.sparse_retain(x, dropout_mask)\n    return pre_out * (1./keep_prob)\n\n\ndef dot(x, y, sparse=False):\n    \"\"\"Wrapper for tf.matmul (sparse vs dense).\"\"\"\n    if sparse:\n        res = tf.sparse_tensor_dense_matmul(x, y)\n    else:\n        res = tf.matmul(x, y)\n    return res\n\n\nclass Layer(object):\n    \"\"\"Base layer class. Defines basic API for all layer objects.\n    Implementation inspired by keras (http://keras.io).\n\n    # Properties\n        name: String, defines the variable scope of the layer.\n        logging: Boolean, switches Tensorflow histogram logging on/off\n\n    # Methods\n        _call(inputs): Defines computation graph of layer\n            (i.e. takes input, returns output)\n        __call__(inputs): Wrapper for _call()\n        _log_vars(): Log all variables\n    \"\"\"\n\n    def __init__(self, **kwargs):\n        allowed_kwargs = {'name', 'logging'}\n        for kwarg in kwargs.keys():\n            assert kwarg in allowed_kwargs, 'Invalid keyword argument: ' + kwarg\n        name = kwargs.get('name')\n        if not name:\n            layer = self.__class__.__name__.lower()\n            name = layer + '_' + str(get_layer_uid(layer))\n        self.name = name\n        self.vars = {}\n        logging = kwargs.get('logging', False)\n        self.logging = logging\n        self.sparse_inputs = False\n\n    def _call(self, inputs):\n        return inputs\n\n    def __call__(self, inputs):\n        with tf.name_scope(self.name):\n            if self.logging and not self.sparse_inputs:\n                tf.summary.histogram(self.name + '/inputs', inputs)\n            outputs = self._call(inputs)\n            if self.logging:\n                for output in outputs:\n                    tf.summary.histogram(self.name + '/outputs', output)\n            return outputs\n\n    def _log_vars(self):\n        for var in self.vars:\n            tf.summary.histogram(self.name + '/vars/' + var, self.vars[var])\n\n\nclass Dense(Layer):\n    \"\"\"Dense layer.\"\"\"\n    def __init__(self, input_dim, output_dim, placeholders, dropout=0., sparse_inputs=False,\n                 act=tf.nn.relu, bias=False, featureless=False, **kwargs):\n        super(Dense, self).__init__(**kwargs)\n\n        if dropout:\n            self.dropout = placeholders['dropout']\n        else:\n            self.dropout = 0.\n\n        self.act = act\n        self.sparse_inputs = sparse_inputs\n        self.featureless = featureless\n        self.bias = bias\n\n        # helper variable for sparse dropout\n        self.num_features_nonzero = placeholders['num_features_nonzero']\n\n        with tf.variable_scope(self.name + '_vars'):\n            self.vars['weights'] = glorot([input_dim, output_dim],\n                                          name='weights')\n            if self.bias:\n                self.vars['bias'] = zeros([output_dim], name='bias')\n\n        if self.logging:\n            self._log_vars()\n\n    def _call(self, inputs):\n        x = inputs\n\n        # dropout\n        if self.sparse_inputs:\n            x = sparse_dropout(x, 1-self.dropout, self.num_features_nonzero)\n        else:\n            x = tf.nn.dropout(x, 1-self.dropout)\n\n        # transform\n        output = dot(x, self.vars['weights'], sparse=self.sparse_inputs)\n\n        # bias\n        if self.bias:\n            output += self.vars['bias']\n\n        return self.act(output), 0\n\n\nclass GraphSampleConvolution(Layer):\n    \"\"\"Graph convolution layer.\"\"\"\n    def __init__(self, input_dim, output_dim, placeholders,\n                 support, #prob, self_features,\n                 name = 'con',\n                 sparse_support=True,\n                 sparse_inputs=False, act=tf.nn.relu, bias=False,\n                 dropout=False, featureless=False, **kwargs):\n        super(GraphSampleConvolution, self).__init__(**kwargs)\n\n        if dropout:\n            self.dropout = placeholders['dropout']\n        else:\n            self.dropout = 0.\n\n        self.name = name\n        self.act = act\n        self.support = support\n        self.sparse_support = sparse_support\n        self.sparse_inputs = sparse_inputs\n        self.featureless = featureless\n        self.bias = bias\n\n        # helper variable for sparse dropout\n        self.num_features_nonzero = placeholders['num_features_nonzero']\n\n        with tf.variable_scope(self.name + '_vars'):\n            self.vars['weights'] = glorot([input_dim, output_dim],\n                                          name='weights')\n            if self.bias:\n                self.vars['bias'] = zeros([output_dim], name='bias')\n\n        if self.logging:\n            self._log_vars()\n\n    def _call(self, inputs):\n        x = inputs\n\n        # dropout\n        if self.sparse_inputs:\n            x = sparse_dropout(x, 1-self.dropout, self.num_features_nonzero)\n        else:\n            x = tf.nn.dropout(x, 1-self.dropout)\n\n        if not self.featureless:\n            pre_sup = dot(x, self.vars['weights'], sparse=self.sparse_inputs)\n        else:\n            pre_sup = self.vars['weights']\n\n        output = dot(self.support, pre_sup, sparse=self.sparse_support)\n\n        # bias\n        if self.bias:\n            output += self.vars['bias']\n\n        return self.act(output), 0\n\n\nclass GraphSampleConvolutionReg(Layer):\n    \"\"\"Graph convolution layer.\"\"\"\n    def __init__(self, input_dim, output_dim, placeholders,\n                 support, #prob, self_features,\n                 name = 'con_reg',\n                 sparse_support=True,\n                 sparse_inputs=False, act=tf.nn.relu, bias=False,\n                 dropout=False, featureless=False, **kwargs):\n        super(GraphSampleConvolutionReg, self).__init__(**kwargs)\n\n        if dropout:\n            self.dropout = placeholders['dropout']\n        else:\n            self.dropout = 0.\n\n        self.name = name\n        self.act = act\n        self.support = support\n        self.sparse_support = sparse_support\n        self.sparse_inputs = sparse_inputs\n        self.featureless = featureless\n        self.bias = bias\n        self.output_dim = output_dim\n        # helper variable for sparse dropout\n        self.num_features_nonzero = placeholders['num_features_nonzero']\n\n        with tf.variable_scope(self.name + '_vars'):\n            self.vars['weights'] = glorot([input_dim, output_dim],\n                                          name='weights')\n            if self.bias:\n                self.vars['bias'] = zeros([output_dim], name='bias')\n\n        if self.logging:\n            self._log_vars()\n\n    def _call(self, inputs):\n        x = inputs\n\n        # dropout\n        if self.sparse_inputs:\n            x = sparse_dropout(x, 1-self.dropout, self.num_features_nonzero)\n        else:\n            x = tf.nn.dropout(x, 1-self.dropout)\n\n        if not self.featureless:\n            pre_sup = dot(x, self.vars['weights'], sparse=self.sparse_inputs)\n        else:\n            pre_sup = self.vars['weights']\n\n        output = dot(self.support, pre_sup, sparse=self.sparse_support)\n\n        n_v = tf.cast(tf.shape(self.support)[0], tf.float32)\n        n_u = tf.cast(tf.shape(self.support)[1], tf.float32)\n\n        mean_output = tf.reshape(tf.reduce_mean(output, axis=0), (1, -1))\n        if self.sparse_support:\n            mean_support = 1.0/tf.cast(n_v, tf.float32)*tf.sparse_reduce_sum(self.support, axis=0)\n        else:\n            mean_support = 1.0/tf.cast(n_v, tf.float32)*tf.reduce_sum(self.support, axis=0)\n        diff = tf.reshape(mean_support, (-1,1))*pre_sup - mean_output\n        reg = 1.0 / tf.cast(n_u * self.output_dim, tf.float32) * tf.reduce_sum(diff * diff)\n\n\n        # bias\n        if self.bias:\n            output += self.vars['bias']\n\n        return self.act(output), reg\n\n\ndef softmax_cross_entropy(preds, labels):\n    loss = tf.nn.softmax_cross_entropy_with_logits(logits=preds, labels=labels)\n    return tf.reduce_mean(loss)\n\ndef accuracy(preds, labels):\n    correct_prediction = tf.equal(tf.argmax(preds, 1), tf.argmax(labels, 1))\n    accuracy_all = tf.cast(correct_prediction, tf.float32)\n    return tf.reduce_mean(accuracy_all)\n\n\nclass Model(object):\n    def __init__(self, **kwargs):\n        allowed_kwargs = {'name', 'logging'}\n        for kwarg in kwargs.keys():\n            assert kwarg in allowed_kwargs, 'Invalid keyword argument: ' + kwarg\n        name = kwargs.get('name')\n        if not name:\n            name = self.__class__.__name__.lower()\n        self.name = name\n\n        logging = kwargs.get('logging', False)\n        self.logging = logging\n\n        self.vars = {}\n        self.placeholders = {}\n\n        self.layers = []\n        self.activations = []\n\n        self.inputs = None\n        self.outputs = None\n\n        self.loss = 0\n        self.reg_loss = 0\n        self.accuracy = 0\n        self.optimizer = None\n        self.opt_op = None\n\n    def _build(self):\n        raise NotImplementedError\n\n    def build(self):\n        \"\"\" Wrapper for _build() \"\"\"\n        with tf.variable_scope(self.name):\n            self._build()\n\n        # Build sequential layer model\n        self.activations.append(self.inputs)\n\n        for layer in self.layers:\n            hidden, reg_loss = layer(self.activations[-1])\n            self.activations.append(hidden)\n\n        self.reg_loss += reg_loss\n        self.outputs = self.activations[-1]\n\n        # Store model variables for easy access\n        variables = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope=self.name)\n        self.vars = {var.name: var for var in variables}\n\n        # Build metrics\n        self._loss()\n        self._accuracy()\n\n        self.opt_op = self.optimizer.minimize(self.loss)\n\n    def predict(self):\n        pass\n\n    def _loss(self):\n        raise NotImplementedError\n\n    def _accuracy(self):\n        raise NotImplementedError\n\n\nclass GCNAdapt(Model):\n    def __init__(self, placeholders, input_dim, sample_train=False, **kwargs):\n        super(GCNAdapt, self).__init__(**kwargs)\n        self.features = placeholders['features_inputs']\n        self.inputs = self.features[0]\n        self.input_dim = input_dim\n        self.output_dim = placeholders['labels'].get_shape().as_list()[1]\n        self.placeholders = placeholders\n        self.supports = placeholders['support']\n        self.probs = placeholders['prob']\n        self.optimizer = tf.train.AdamOptimizer(learning_rate=FLAGS.learning_rate)\n        with tf.variable_scope(self.name, reuse=True):\n            self.sample_params =tf.get_variable('sample_weights', [input_dim, 2])\n\n        self.support_21 = self._attention(self.supports[0], self.features[0], self.features[1], self.probs[0])\n        self.support_32 = self._attention(self.supports[1], self.features[1], self.features[2], self.probs[1])\n\n        self.build()\n\n    def _loss(self):\n        # Weight decay loss\n        for var in self.layers[0].vars.values():\n            self.loss += FLAGS.weight_decay * tf.nn.l2_loss(var)\n\n        # Cross entropy error\n        self.loss += softmax_cross_entropy(self.outputs, self.placeholders['labels'])\n\n        self.loss += FLAGS.var*self.reg_loss\n\n    def _accuracy(self):\n        self.accuracy = accuracy(self.outputs, self.placeholders['labels'])\n\n    def _attention(self, support, x_u, x_v, prob):\n        sample_params = self.sample_params\n        n_v = tf.shape(support)[0]\n        n_u = tf.shape(support)[1]\n        h_v = tf.matmul(x_v, tf.expand_dims(sample_params[:,0], -1))          # v*1\n        h_u = tf.matmul(x_u, tf.expand_dims(sample_params[:,1], -1))          # u*1\n        attention = 1/tf.cast(n_u, tf.float32) * (tf.nn.relu(h_v + tf.reshape(h_u, (1, n_u))) + 1)       # v*u\n        support = support*(attention/tf.reshape(prob, (1, n_u)))\n\n        return support\n\n    def _build(self):\n        self.layers.append(GraphSampleConvolution(input_dim=self.input_dim,\n                                                  output_dim=FLAGS.hidden1,\n                                                  placeholders=self.placeholders,\n                                                  support=self.support_21,\n                                                  act=tf.nn.relu,\n                                                  dropout=True,\n                                                  sparse_inputs=False,\n                                                  logging=self.logging))\n\n        self.layers.append(GraphSampleConvolutionReg(input_dim=FLAGS.hidden1,\n                                                      output_dim=self.output_dim,\n                                                      placeholders=self.placeholders,\n                                                      support=self.support_32,\n                                                      act=lambda x: x,\n                                                      dropout=True,\n                                                      logging=self.logging))\n\n    def predict(self):\n        return tf.nn.softmax(self.outputs)\n\n\nclass GCNAdaptMix(Model):\n    def __init__(self, placeholders, input_dim, sample_train=False, **kwargs):\n        super(GCNAdaptMix, self).__init__(**kwargs)\n        self.features = placeholders['features_inputs']\n        self.inputs = self.features[0]\n        self.input_dim = input_dim\n        self.output_dim = placeholders['labels'].get_shape().as_list()[1]\n        self.placeholders = placeholders\n        self.supports = placeholders['support']\n        self.probs = placeholders['prob']\n        self.optimizer = tf.train.AdamOptimizer(learning_rate=FLAGS.learning_rate)\n\n        with tf.variable_scope(self.name, reuse=True):\n            self.sample_params =tf.get_variable('sample_weights', [input_dim, 2])\n\n        self.build()\n\n    def _loss(self):\n        # Weight decay loss\n        for var in self.layers[0].vars.values():\n            self.loss += FLAGS.weight_decay * tf.nn.l2_loss(var)\n\n        # Cross entropy error\n        self.loss += softmax_cross_entropy(self.outputs, self.placeholders['labels'])\n\n        self.loss += FLAGS.var * self.reg_loss\n\n    def _accuracy(self):\n        self.accuracy = accuracy(self.outputs, self.placeholders['labels'])\n\n    def _attention(self, support, x_u, x_v, prob):\n        sample_params = self.sample_params\n        n_v = tf.shape(x_v)[0]\n        n_u = tf.shape(x_u)[0]\n        h_v = tf.matmul(x_v, tf.expand_dims(sample_params[:,0], -1))          # v*1\n        h_u = tf.matmul(x_u, tf.expand_dims(sample_params[:,1], -1))          # u*1\n        attention = 1/tf.cast(n_u, tf.float32) * (tf.nn.relu(h_v + tf.reshape(h_u, (1, n_u))) + 1)       # v*u\n        support = support*(1*attention/tf.reshape(prob, (1, n_u)))\n        return support\n\n    def _build(self):\n        self.layers.append(Dense(input_dim=self.input_dim,\n                                 output_dim=FLAGS.hidden1,\n                                 placeholders=self.placeholders,\n                                 act=tf.nn.relu,\n                                 dropout=True,\n                                 sparse_inputs=False,\n                                 logging=self.logging))\n\n        self.layers.append(GraphSampleConvolutionReg(input_dim=FLAGS.hidden1,\n                                                      output_dim=self.output_dim,\n                                                      placeholders=self.placeholders,\n                                                      support=self._attention(self.supports[0], self.features[0], self.features[1], self.probs[0]),\n                                                      act=lambda x: x,\n                                                      dropout=True,\n                                                      logging=self.logging))\n\n    def predict(self):\n        return tf.nn.softmax(self.outputs)\n\n\nclass Sampler(object):\n    \"\"\"Sampling and Network Constructing\"\"\"\n\n    def __init__(self, placeholders, **kwargs):\n        allowed_kwargs = {'num_layers', 'input_dim', 'layer_sizes', 'scope'}\n        for kwarg in kwargs.keys():\n            assert kwarg in allowed_kwargs, 'Invalid keyword argument: ' + kwarg\n\n        self.input_dim = kwargs.get('input_dim', 1)\n        self.layer_sizes = kwargs.get('layer_sizes', [1])\n        self.scope = kwargs.get('scope', 'test_graph')\n\n        self.num_layers = len(self.layer_sizes)\n\n        with tf.variable_scope(self.scope, reuse=True):\n            self.w_s = tf.get_variable('sample_weights', [self.input_dim, 2])\n\n        self.adj = tf.Variable(placeholders['adj'], trainable=False, name=\"adj\")\n        self.adj_val = tf.Variable(placeholders['adj_val'], trainable=False, name=\"adj_val\")\n        self.x = tf.Variable(placeholders['features'], trainable=False, name=\"x\")\n\n        self.num_data = tf.shape(self.adj)[0]\n\n    def sampling(self, v):\n        pass\n\n\nclass SamplerAdapt(Sampler):\n    \"\"\"Parameters of the sampler are adaptive\"\"\"\n\n    def sampling(self, v):\n        all_support = [[]] * (self.num_layers - 1)\n        all_p_u = [[]] * (self.num_layers - 1)\n        all_x_u = [[]] * self.num_layers\n\n        # sample top-1 layer\n        this_x_v = tf.gather(self.x, v)\n        this_adj = tf.gather(self.adj, v)\n        this_adj_val = tf.gather(self.adj_val, v)\n        all_x_u[self.num_layers - 1] = this_x_v\n\n        # top-down sampling from top-2 layer to the input layer\n        for i in range(self.num_layers - 1):\n            layer = self.num_layers - i - 2\n\n            u_sampled, support, p_u = self.one_layer_sampling(adj=this_adj, adj_val=this_adj_val, x_v=this_x_v,\n                                                              output_size=self.layer_sizes[layer])\n\n            this_x_v = tf.gather(self.x, u_sampled)\n            this_adj = tf.gather(self.adj, u_sampled)\n            this_adj_val = tf.gather(self.adj_val, u_sampled)\n\n            all_x_u[layer] = this_x_v\n            all_support[layer] = support\n            all_p_u[layer] = p_u\n\n        return all_x_u, all_support, all_p_u\n\n    def one_layer_sampling(self, adj, adj_val, x_v, output_size):\n        \"\"\"layer wise sampling \"\"\"\n\n        support, u = from_adjlist(adj, adj_val)\n        x_u = tf.gather(self.x, u)\n        h_v = tf.reduce_sum(tf.matmul(x_v, tf.expand_dims(self.w_s[:, 1], -1)))\n        h_u = tf.matmul(x_u, tf.expand_dims(self.w_s[:, 0], -1))\n        attention = tf.reshape(1 / tf.cast(output_size, tf.float32) * (tf.nn.relu(h_v + h_u) + 1), [-1])\n        g_u = tf.reshape(tf.nn.relu(h_u) + 1, [-1])\n\n        p1 = tf.cast(tf.sqrt(tf.sparse_reduce_sum(tf.square(support), axis=0)), dtype=tf.float32) * attention * g_u\n        p1 = p1 / tf.reduce_sum(p1)\n\n        samples = tf.cast(tf.multinomial([tf.log(p1)], output_size), tf.int64)\n\n        u_sampled = tf.gather(u, samples[0])\n        p_u = tf.gather(p1, samples[0])\n        support = SparsePlus(support)\n        support_sampled = support.gather_columns(samples[0])\n\n        return u_sampled, support_sampled, p_u\n\n\nclass SparsePlus(object):\n    \"\"\"A wrapper around the tf sparsetensor with more functions implemented\"\"\"\n    def __init__(self, sparse_tensor):\n        self.sparse_tensor = sparse_tensor\n        self.rows = self.sparse_tensor.indices[:, 0]\n        self.cols = self.sparse_tensor.indices[:, 1]\n        self.values = self.sparse_tensor.values\n        self.dense_shape = self.sparse_tensor.dense_shape\n\n    def gather_columns(self, needed_col_ids):\n        \"\"\"Gather needed columns from the sparsetensor\"\"\"\n        support = gather_columns(self.sparse_tensor, needed_col_ids)\n\n        return support\n\n\ndef gather_columns(support, needed_col_ids):\n    \"\"\"Gather needed columns from the sparse support matrix\"\"\"\n    needed_col_ids = tf.cast(needed_col_ids, tf.int64)\n    rows = support.indices[:,0]\n    cols = support.indices[:,1]\n    values = support.values\n    dense_shape = support.dense_shape\n\n    num_samples = tf.size(rows)\n    connect = tf.equal(tf.reshape(cols, [-1, 1]), tf.reshape(needed_col_ids, [1, -1]))\n    partitions = tf.cast(tf.reduce_any(connect, axis=1), tf.int32)\n    samples_to_gather = tf.cast(tf.dynamic_partition(tf.range(num_samples), partitions, 2)[1], tf.int64)\n\n    new_rows = tf.gather(rows, samples_to_gather)\n    new_cols = tf.gather(tf.argmax(tf.cast(connect, tf.int64), axis=1), samples_to_gather)\n    new_values = tf.gather(values, samples_to_gather)\n    dense_shape = tf.stack((dense_shape[0], tf.size(needed_col_ids, out_type=tf.int64)))\n\n    support = tf.SparseTensor(indices=tf.stack((new_rows, new_cols), axis=1), values=new_values, dense_shape=dense_shape)\n\n    return support\n\n\ndef from_adjlist(adj, adj_val):\n    \"\"\"Transfer adj-list format to sparsetensor\"\"\"\n    u_sampled, index = tf.unique(tf.reshape(adj, [-1]), out_idx=tf.int64)\n\n    row = tf.cast(tf.range(tf.size(index)) // tf.shape(adj)[1], tf.int64)\n    col = index\n    values = tf.reshape(adj_val, [-1])\n    indices = tf.stack([row, col], axis=1)\n    dense_shape = tf.cast(tf.stack((tf.shape(adj)[0], tf.size(u_sampled))), tf.int64)\n\n    support = tf.SparseTensor(indices=indices, values=values, dense_shape=dense_shape)\n\n    return support, u_sampled\n\n\ndef parse_index_file(filename):\n    \"\"\"Parse index file.\"\"\"\n    index = []\n    for line in open(filename):\n        index.append(int(line.strip()))\n    return index\n\n\ndef sample_mask(idx, l):\n    \"\"\"Create mask.\"\"\"\n    mask = np.zeros(l)\n    mask[idx] = 1\n    return np.array(mask, dtype=np.bool)\n\n\ndef load_data(dataset_str):\n    \"\"\"Load data.\"\"\"\n    names = ['x', 'y', 'tx', 'ty', 'allx', 'ally', 'graph']\n    objects = []\n    for i in range(len(names)):\n        with open(\"data/ind.{}.{}\".format(dataset_str, names[i]), 'rb') as f:\n            if sys.version_info > (3, 0):\n                objects.append(pkl.load(f, encoding='latin1'))\n            else:\n                objects.append(pkl.load(f))\n\n    x, y, tx, ty, allx, ally, graph = tuple(objects)\n    test_idx_reorder = parse_index_file(\"data/ind.{}.test.index\".format(dataset_str))\n    test_idx_range = np.sort(test_idx_reorder)\n\n    if dataset_str == 'citeseer':\n        # Fix citeseer dataset (there are some isolated nodes in the graph)\n        # Find isolated nodes, add them as zero-vecs into the right position\n        test_idx_range_full = range(min(test_idx_reorder), max(test_idx_reorder)+1)\n        tx_extended = sp.lil_matrix((len(test_idx_range_full), x.shape[1]))\n        tx_extended[test_idx_range-min(test_idx_range), :] = tx\n        tx = tx_extended\n        ty_extended = np.zeros((len(test_idx_range_full), y.shape[1]))\n        ty_extended[test_idx_range-min(test_idx_range), :] = ty\n        ty = ty_extended\n\n    features = sp.vstack((allx, tx)).tolil()\n    features[test_idx_reorder, :] = features[test_idx_range, :]\n    adj = nx.adjacency_matrix(nx.from_dict_of_lists(graph))\n\n    labels = np.vstack((ally, ty))\n    labels[test_idx_reorder, :] = labels[test_idx_range, :]\n\n    idx_test = test_idx_range.tolist()\n    idx_train = range(len(ally)-500)\n    idx_val = range(len(ally)-500, len(ally))\n\n    train_mask = sample_mask(idx_train, labels.shape[0])\n    val_mask = sample_mask(idx_val, labels.shape[0])\n    test_mask = sample_mask(idx_test, labels.shape[0])\n\n    y_train = np.zeros(labels.shape)\n    y_val = np.zeros(labels.shape)\n    y_test = np.zeros(labels.shape)\n    y_train[train_mask, :] = labels[train_mask, :]\n    y_val[val_mask, :] = labels[val_mask, :]\n    y_test[test_mask, :] = labels[test_mask, :]\n\n    return adj, features, y_train, y_val, y_test, train_mask, val_mask, test_mask\n\n\ndef nontuple_preprocess_features(features):\n    \"\"\"Row-normalize feature matrix and convert to tuple representation\"\"\"\n    rowsum = np.array(features.sum(1))\n    r_inv = np.power(rowsum, -1).flatten()\n    r_inv[np.isinf(r_inv)] = 0.\n    r_mat_inv = sp.diags(r_inv)\n    features = r_mat_inv.dot(features)\n    return features\n\n\ndef normalize_adj(adj):\n    \"\"\"Symmetrically normalize adjacency matrix.\"\"\"\n    adj = sp.coo_matrix(adj)\n    rowsum = np.array(adj.sum(1))\n    d_inv_sqrt = np.power(rowsum, -0.5).flatten()\n    d_inv_sqrt[np.isinf(d_inv_sqrt)] = 0.\n    d_mat_inv_sqrt = sp.diags(d_inv_sqrt)\n    return adj.dot(d_mat_inv_sqrt).transpose().dot(d_mat_inv_sqrt).tocoo()\n\ndef nontuple_preprocess_adj(adj):\n    adj_normalized = normalize_adj(sp.eye(adj.shape[0]) + adj)\n    return adj_normalized.tocsr()\n\n\ndef construct_feed_dict_with_prob(features_inputs, supports, probs, labels, labels_mask, placeholders):\n    \"\"\"Construct feed dictionary with adding sampling prob.\"\"\"\n    feed_dict = dict()\n    feed_dict.update({placeholders['labels']: labels})\n    feed_dict.update({placeholders['labels_mask']: labels_mask})\n    feed_dict.update({placeholders['features_inputs'][i]: features_inputs[i] for i in range(len(features_inputs))})\n    feed_dict.update({placeholders['support'][i]: supports[i] for i in range(len(supports))})\n    feed_dict.update({placeholders['prob'][i]: probs[i] for i in range(len(probs))})\n    feed_dict.update({placeholders['num_features_nonzero']: features_inputs[1].shape})\n    return feed_dict\n\n\ndef iterate_minibatches_listinputs(inputs, batchsize, shuffle=False):\n    assert inputs is not None\n    numSamples = inputs[0].shape[0]\n    indices = np.arange(numSamples)\n    if shuffle:\n        np.random.shuffle(indices)\n    for start_idx in range(0, numSamples - batchsize + 1, batchsize):\n        if shuffle:\n            excerpt = indices[start_idx:start_idx + batchsize]\n        else:\n            excerpt = slice(start_idx, start_idx + batchsize)\n        yield [input[excerpt] for input in inputs]\n\ndef compute_adjlist(sp_adj, max_degree):\n    \"\"\"Transfer sparse adjacent matrix to adj-list format\"\"\"\n    num_data = sp_adj.shape[0]\n    adj = num_data+np.zeros((num_data+1, max_degree), dtype=np.int32)\n    adj_val = np.zeros((num_data+1, max_degree), dtype=np.float32)\n\n    for v in range(num_data):\n        neighbors = np.nonzero(sp_adj[v, :])[1]\n        len_neighbors = len(neighbors)\n        if len_neighbors > max_degree:\n            neighbors = np.random.choice(neighbors, max_degree, replace=False)\n            adj[v] = neighbors\n            adj_val[v, :len_neighbors] = sp_adj[v, neighbors].toarray()\n        else:\n            adj[v, :len_neighbors] = neighbors\n            adj_val[v, :len_neighbors] = sp_adj[v, neighbors].toarray()\n\n    return adj, adj_val\n\n\ndef prepare_pubmed(dataset, max_degree):\n\n    adj, features, y_train, y_val, y_test, train_mask, val_mask, test_mask = load_data(dataset)\n\n    train_index = np.where(train_mask)[0]\n    adj_train = adj[train_index, :][:, train_index]\n    y_train = y_train[train_index]\n    val_index = np.where(val_mask)[0]\n    y_val = y_val[val_index]\n    test_index = np.where(test_mask)[0]\n    y_test = y_test[test_index]\n\n    num_train = adj_train.shape[0]\n    input_dim = features.shape[1]\n\n    features = nontuple_preprocess_features(features).todense()\n    train_features = features[train_index]\n\n    norm_adj_train = nontuple_preprocess_adj(adj_train)\n    norm_adj = nontuple_preprocess_adj(adj)\n\n    if dataset == 'pubmed':\n        norm_adj = 1*sp.diags(np.ones(norm_adj.shape[0])) + norm_adj\n        norm_adj_train = 1*sp.diags(np.ones(num_train)) + norm_adj_train\n\n    adj_train, adj_val_train = compute_adjlist(norm_adj_train, max_degree)\n    train_features = np.concatenate((train_features, np.zeros((1, input_dim))))\n\n    return norm_adj, adj_train, adj_val_train, features, train_features, y_train, y_test, test_index\n\n\n# Main execution logic and flag definitions for setup from run_pubmed.py\nflags = tf.app.flags\nFLAGS = flags.FLAGS\nflags.DEFINE_string('dataset', 'cora', 'Dataset string.')\nflags.DEFINE_string('model', 'gcn_adapt', 'Model string.')\nflags.DEFINE_float('learning_rate', 0.001, 'Initial learning rate.')\nflags.DEFINE_integer('epochs', 300, 'Number of epochs to train.')\nflags.DEFINE_integer('hidden1', 16, 'Number of units in hidden layer 1.')\nflags.DEFINE_float('dropout', 0.0, 'Dropout rate (1 - keep probability).')\nflags.DEFINE_float('weight_decay', 5e-4, 'Weight for L2 loss on embedding matrix.')\nflags.DEFINE_integer('early_stopping', 30, 'Tolerance for early stopping (# of epochs).')\nflags.DEFINE_integer('max_degree', 32, 'Maximum degree for constructing the adjacent matrix.')\nflags.DEFINE_string('gpu', '0', 'The gpu to be applied.')\nflags.DEFINE_string('sampler_device', 'cpu', 'The device for sampling: cpu or gpu.')\nflags.DEFINE_integer('rank', 128, 'The number of nodes per layer.')\nflags.DEFINE_integer('skip', 0, 'If use skip connection.')\nflags.DEFINE_float('var', 0.5, 'If use variance reduction.')\n# os.environ[\"CUDA_VISIBLE_DEVICES\"] = str(FLAGS.gpu) # This line depends on FLAGS.gpu value at runtime\n\n\ndef main_run_pubmed(rank1, rank0):\n    adj, adj_train, adj_val_train, features, train_features, y_train, y_test, test_index = prepare_pubmed(FLAGS.dataset, FLAGS.max_degree)\n    # print('preparation done!')\n\n    max_degree = FLAGS.max_degree\n    num_train = adj_train.shape[0] - 1\n    input_dim = features.shape[1]\n    scope = 'test'\n\n    if FLAGS.model == 'gcn_adapt_mix':\n        num_supports = 1\n        propagator = GCNAdaptMix\n        layer_sizes = [rank1, 256]\n    elif FLAGS.model == 'gcn_adapt':\n        num_supports = 2\n        propagator = GCNAdapt\n        layer_sizes = [rank0, rank1, 256]\n    else:\n        raise ValueError('Invalid argument for model: ' + str(FLAGS.model))\n\n    placeholders = {\n        'batch': tf.placeholder(tf.int32),\n        'adj': tf.placeholder(tf.int32, shape=(num_train+1, max_degree)),\n        'adj_val': tf.placeholder(tf.float32, shape=(num_train+1, max_degree)),\n        'features': tf.placeholder(tf.float32, shape=train_features.shape),\n        'support': [tf.sparse_placeholder(tf.float32) for _ in range(num_supports)],\n        'prob': [tf.placeholder(tf.float32) for _ in range(num_supports)],\n        'features_inputs': [tf.placeholder(tf.float32, shape=(None, input_dim)) for _ in range(num_supports+1)],\n        'labels': tf.placeholder(tf.float32, shape=(None, y_train.shape[1])),\n        'labels_mask': tf.placeholder(tf.int32),\n        'dropout': tf.placeholder_with_default(0., shape=()),\n        'num_features_nonzero': tf.placeholder(tf.int32)\n    }\n\n    with tf.variable_scope(scope):\n        w_s = glorot([features.shape[-1], 2], name='sample_weights')\n\n    if FLAGS.sampler_device == 'cpu':\n        with tf.device('/cpu:0'):\n            sampler_tf = SamplerAdapt(placeholders, input_dim=input_dim, layer_sizes=layer_sizes, scope=scope)\n            features_sampled, support_sampled, p_u_sampled = sampler_tf.sampling(placeholders['batch'])\n    else:\n        sampler_tf = SamplerAdapt(placeholders, input_dim=input_dim, layer_sizes=layer_sizes, scope=scope)\n        features_sampled, support_sampled, p_u_sampled = sampler_tf.sampling(placeholders['batch'])\n\n    model = propagator(placeholders, input_dim=input_dim, logging=True, name=scope)\n\n    config = tf.ConfigProto(device_count={\"CPU\": 1},\n                            inter_op_parallelism_threads=0,\n                            intra_op_parallelism_threads=0,\n                            allow_soft_placement=True,\n                            log_device_placement=False)\n    sess = tf.Session(config=config)\n\n    sess.run(tf.global_variables_initializer(), feed_dict={placeholders['adj']: adj_train,\n                                                           placeholders['adj_val']: adj_val_train,\n                                                           placeholders['features']: train_features})\n\n    for epoch in range(FLAGS.epochs):\n        # sample_time = 0 # commented out for brevity\n        # t1 = time.time() # commented out for brevity\n\n        for batch in iterate_minibatches_listinputs([y_train, np.arange(num_train)], batchsize=256, shuffle=True):\n            [y_train_batch, train_batch] = batch\n\n            if sum(train_batch) < 1:\n                continue\n            # ts = time.time() # commented out for brevity\n            features_inputs, supports, probs = sess.run([features_sampled, support_sampled, p_u_sampled],\n                                                        feed_dict={placeholders['batch']:train_batch})\n            # sample_time += time.time()-ts # commented out for brevity\n\n            feed_dict = construct_feed_dict_with_prob(features_inputs, supports, probs, y_train_batch, [],\n                                                      placeholders)\n            feed_dict.update({placeholders['dropout']: FLAGS.dropout})\n\n            outs = sess.run([model.opt_op, model.loss, model.accuracy], feed_dict=feed_dict))\n",
+    "experimental_info": "The method optimizes sampling variance by reformulating it as an adversary bandit problem. It employs nonparametric estimates of the sampler, which are iteratively updated based on partial knowledge acquired from sampled neighbors. The reward for choosing a set of neighbors is defined as the negative derivative of the effective sampling variance.\n\nTwo primary GNN architectures integrate this adaptive sampling:\n1.  **GCNAdapt**: Samples neighbors for two successive graph convolution layers.\n2.  **GCNAdaptMix**: Combines a standard dense layer with a single graph convolution layer that uses adaptive sampling.\n\nKey components of the methodology:\n-   **Adaptive Sampler (`SamplerAdapt`)**: This component calculates sampling probabilities (`p1`) using learnable `sample_weights` (`w_s`) and an attention mechanism. It then selects a subset of neighbors using `tf.multinomial`.\n-   **Attention Mechanism (`_attention` function)**: This mechanism adjusts feedback attention values based on node features (`x_u`, `x_v`) and the `sample_weights` (`sample_params`) to approximate true attention values within sampled neighborhoods.\n-   **Variance Reduction (`GraphSampleConvolutionReg` layer)**: This layer computes a regularization term (`reg`) which is incorporated into the overall loss. This `reg` term represents the negative derivative of the effective sampling variance, directly addressing the optimization objective.\n-   **Model Integration**: Both `GCNAdapt` and `GCNAdaptMix` models include `FLAGS.var * self.reg_loss` in their total loss, emphasizing the variance optimization aspect.\n\n### Experimental Settings (from `run_pubmed.py`):\n-   **Dataset**: Typically runs on 'pubmed', but can be configured for 'cora', 'citeseer'. Data undergoes preprocessing, including feature normalization and conversion to an adjacency list format with a maximum degree limit.\n-   **Model Choice**: `gcn_adapt` (two sampling layers) or `gcn_adapt_mix` (dense + one sampling layer).\n-   **Learning Rate**: 0.001 (for Adam optimizer).\n-   **Epochs**: 300.\n-   **Hidden Layer Size**: 16 units in the first hidden layer.\n-   **Dropout Rate**: 0.0 (equivalent to keeping all units).\n-   **Weight Decay (L2 Loss)**: 5e-4.\n-   **Early Stopping**: Tolerance of 30 epochs (training stops if validation loss does not improve for 30 consecutive epochs).\n-   **Maximum Degree (`max_degree`)**: 32, used when constructing the adjacency list for sampling.\n-   **GPU Usage**: Configurable, default is GPU '0'.\n-   **Sampler Device**: Defaults to 'cpu', can be set to 'gpu'.\n-   **Rank (`rank`)**: 128, specifies the number of nodes sampled per layer (`rank0` and `rank1` for `GCNAdapt` are set to this value).\n-   **Skip Connection (`skip`)**: 0 (disabled by default).\n-   **Variance Reduction Coefficient (`var`)**: 0.5, weighting factor for the regularization term in the loss function.\n-   **Batch Size**: Training is performed in mini-batches of 256 nodes."
+}
