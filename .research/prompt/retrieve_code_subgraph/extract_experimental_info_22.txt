@@ -1,0 +1,3266 @@
+
+Input:
+You are a researcher with expertise in engineering in the field of machine learning.
+
+# Instructions
+- The content described in “Repository Content” corresponds to the GitHub repository of the method described in “Method.”
+- Please extract the following two pieces of information from “Repository Content”:
+    - experimental_code：Extract the implementation sections that are directly related to the method described in “Method.”
+    - experimental_info：Extract and output the experimental settings related to the method described in “Method.”
+
+# Method
+GraphSAINT employs a graph sampling-based minibatch construction where, in each iteration, a subgraph (Gs) is sampled from the full training graph (G), and a complete GCN is built and trained on this subgraph. To counter bias introduced by non-uniform sampling, it uses two normalization techniques: aggregator normalization (αu,v = pu,v/pv) for feature propagation and loss normalization (λv = |V| * pv) for minibatch loss, with probabilities pu,v and pv estimated during pre-processing. For variance reduction, the paper derives optimal edge sampling probabilities, simplified to be proportional to (1/deg(u) + 1/deg(v)), making it topology-dependent. GraphSAINT integrates several light-weight samplers: Random Node Sampler, Random Edge Sampler, and Random Walk (RW) based samplers (Regular Random Walk and Multi-dimensional Random Walk). All samplers return node-induced subgraphs, empirically aiding convergence. The methodology is designed to be compatible with advanced GCN architectures like Jumping Knowledge networks and Graph Attention Networks.
+
+# Repository Content
+File Path: convert.py
+Content:
+import scipy.sparse as sp
+import numpy as np
+import networkx as nx
+import sys
+import json
+import os
+from networkx.readwrite import json_graph
+
+dataset_str=sys.argv[1]
+baseline_str='data.ignore/'+dataset_str+'/'
+dataset_str='data/'+dataset_str+'/'
+if not os.path.exists(baseline_str[:-1]):
+    os.mkdir(baseline_str[:-1])
+
+# G.json
+adj_full=sp.load_npz(dataset_str+'adj_full.npz')
+G=nx.from_scipy_sparse_matrix(adj_full)
+print('nx: finish load graph')
+data=json_graph.node_link_data(G)
+role=json.load(open(dataset_str+'role.json','r'))
+te=set(role['te'])
+va=set(role['va'])
+for node in data['nodes']:
+    node['test']=False
+    node['val']=False
+    if node['id'] in te:
+        node['test']=True
+    elif node['id'] in va:
+        node['val']=True
+for edge in data['links']:
+    del edge['weight']
+    edge['target']=int(edge['target'])
+with open(baseline_str+'G.json','w') as f:
+    json.dump(data,f)
+ 
+
+# id_map.json
+id_map={}
+for i in range(G.number_of_nodes()):
+    id_map[str(i)]=i
+with open(baseline_str+'id_map.json','w') as f:
+    json.dump(id_map,f)
+
+# feats.npy
+feats=np.load(dataset_str+'feats.npy')
+np.save(baseline_str+'feats.npy',feats)
+
+# class_map.json
+class_map=json.load(open(dataset_str+'class_map.json','r'))
+for k,v in class_map.items():
+    class_map[k]=v
+with open(baseline_str+'class_map.json','w') as f:
+    json.dump(class_map,f)
+
+File Path: data/open_graph_benchmark/ogbn_converter.py
+Content:
+import json
+import sys
+import os
+import numpy as np
+import scipy.sparse as sp
+from tqdm import tqdm
+from ogb.nodeproppred import PygNodePropPredDataset
+
+"""
+Run this script to convert the graph from the open graph benchmark format
+to the GraphSAINT format.
+
+Right now, ogbn-products and ogbn-arxiv can be converted by this script.
+"""
+
+
+dataset = PygNodePropPredDataset(name=sys.argv[1])
+split_idx = dataset.get_idx_split()
+train_idx, valid_idx, test_idx = split_idx['train'], split_idx['valid'], split_idx['test']
+graph = dataset[0]
+num_node = graph.y.shape[0]
+# import pdb; pdb.set_trace()
+
+save_dir = './data/'+sys.argv[1]+'/'
+try:
+    os.mkdir(save_dir)
+except OSError as error:
+    print(error)
+
+# feats.npy
+feats = graph.x.numpy()
+np.save(save_dir+'feats.npy',feats)
+
+# role.json
+role = dict()
+role['tr'] = train_idx.numpy().tolist()
+role['va'] = valid_idx.numpy().tolist()
+role['te'] = test_idx.numpy().tolist()
+with open(save_dir+'role.json','w') as f:
+    json.dump(role, f)
+
+# class_map.json
+class_map = dict()
+for i in range(num_node):
+    class_map[str(i)] = int(graph.y[i])
+with open(save_dir + 'class_map.json', 'w') as f:
+    json.dump(class_map, f)
+
+# adj_*.npz
+train_idx_set = set(train_idx.numpy().tolist())
+test_idx_set = set(test_idx.numpy().tolist())
+edge_index = graph.edge_index.numpy()
+row_full = edge_index[0]
+col_full = edge_index[1]
+row_train = []
+col_train = []
+row_val = []
+col_val = []
+for i in tqdm(range(row_full.shape[0])):
+    if row_full[i] in train_idx_set and col_full[i] in train_idx_set:
+        row_train.append(row_full[i])
+        col_train.append(col_full[i])
+        row_val.append(row_full[i])
+        col_val.append(col_full[i])
+    elif not (row_full[i] in test_idx_set or col_full[i] in test_idx_set):
+        row_val.append(row_full[i])
+        col_val.append(col_full[i])
+row_train = np.array(row_train)
+col_train = np.array(col_train)
+row_val = np.array(row_val)
+col_val = np.array(col_val)
+dtype = np.bool
+
+adj_full = sp.coo_matrix(
+    (
+        np.ones(row_full.shape[0], dtype=dtype),
+        (row_full, col_full),
+    ),
+    shape=(num_node, num_node)
+).tocsr()
+
+adj_train = sp.coo_matrix(
+    (
+        np.ones(row_train.shape[0], dtype=dtype),
+        (row_train, col_train),
+    ),
+    shape=(num_node, num_node)
+).tocsr()
+
+adj_val = sp.coo_matrix(
+    (
+        np.ones(row_val.shape[0], dtype=dtype),
+        (row_val, col_val),
+    ),
+    shape=(num_node, num_node)
+).tocsr()
+
+# import pdb; pdb.set_trace()
+print('adj_full  num edges:', adj_full.nnz)
+print('adj_val   num edges:', adj_val.nnz)
+print('adj_train num edges:', adj_train.nnz)
+sp.save_npz(save_dir+'adj_full.npz', adj_full)
+sp.save_npz(save_dir+'adj_train.npz', adj_train)
+# adj_val not used in GraphSAINT
+sp.save_npz(save_dir+'adj_val.npz', adj_val)
+
+File Path: graphsaint/__init__.py
+Content:
+
+File Path: graphsaint/globals.py
+Content:
+import numpy as np
+import os,sys,time,datetime
+from os.path import expanduser
+import argparse
+
+
+import subprocess
+git_rev = subprocess.Popen("git rev-parse --short HEAD", shell=True, stdout=subprocess.PIPE, universal_newlines=True).communicate()[0]
+git_branch = subprocess.Popen("git symbolic-ref --short -q HEAD", shell=True, stdout=subprocess.PIPE, universal_newlines=True).communicate()[0]
+
+timestamp = time.time()
+timestamp = datetime.datetime.fromtimestamp(int(timestamp)).strftime('%Y-%m-%d %H-%M-%S')
+
+
+
+
+# Set random seed
+#seed = 123
+#np.random.seed(seed)
+#tf.set_random_seed(seed)
+
+
+parser = argparse.ArgumentParser(description="argument for GraphSAINT training")
+parser.add_argument("--num_cpu_core",default=20,type=int,help="Number of CPU cores for parallel sampling")
+parser.add_argument("--log_device_placement",default=False,action="store_true",help="Whether to log device placement")
+parser.add_argument("--data_prefix",required=True,type=str,help="prefix identifying training data")
+parser.add_argument("--dir_log",default=".",type=str,help="base directory for logging and saving embeddings")
+parser.add_argument("--gpu",default="-1234",type=str,help="which GPU to use")
+parser.add_argument("--eval_train_every",default=15,type=int,help="How often to evaluate training subgraph accuracy")
+parser.add_argument("--train_config",required=True,type=str,help="path to the configuration of training (*.yml)")
+parser.add_argument("--dtype",default="s",type=str,help="d for double, s for single precision floating point")
+parser.add_argument("--timeline",default=False,action="store_true",help="to save timeline.json or not")
+parser.add_argument("--tensorboard",default=False,action="store_true",help="to save data to tensorboard or not")
+parser.add_argument("--dualGPU",default=False,action="store_true",help="whether to distribute the model to two GPUs")
+parser.add_argument("--cpu_eval",default=False,action="store_true",help="whether to use CPU to do evaluation")
+parser.add_argument("--saved_model_path",default="",type=str,help="path to pretrained model file")
+args_global = parser.parse_args()
+
+
+NUM_PAR_SAMPLER = args_global.num_cpu_core
+SAMPLES_PER_PROC = -(-200 // NUM_PAR_SAMPLER) # round up division
+
+EVAL_VAL_EVERY_EP = 1       # get accuracy on the validation set every this # epochs
+
+
+# auto choosing available NVIDIA GPU
+gpu_selected = args_global.gpu
+if gpu_selected == '-1234':
+    # auto detect gpu by filtering on the nvidia-smi command output
+    gpu_stat = subprocess.Popen("nvidia-smi",shell=True,stdout=subprocess.PIPE,universal_newlines=True).communicate()[0]
+    gpu_avail = set([str(i) for i in range(8)])
+    for line in gpu_stat.split('\n'):
+        if 'python' in line:
+            if line.split()[1] in gpu_avail:
+                gpu_avail.remove(line.split()[1])
+            if len(gpu_avail) == 0:
+                gpu_selected = -2
+            else:
+                gpu_selected = sorted(list(gpu_avail))[0]
+    if gpu_selected == -1:
+        gpu_selected = '0'
+    args_global.gpu = int(gpu_selected)
+if str(gpu_selected).startswith('nvlink'):
+    os.environ["CUDA_VISIBLE_DEVICES"]=str(gpu_selected).split('nvlink')[1]
+elif int(gpu_selected) >= 0:
+    os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"
+    os.environ["CUDA_VISIBLE_DEVICES"]=str(gpu_selected)
+    GPU_MEM_FRACTION = 0.8
+else:
+    os.environ["CUDA_VISIBLE_DEVICES"]="-1"
+args_global.gpu = int(args_global.gpu)
+
+# global vars
+
+f_mean = lambda l: sum(l)/len(l)
+
+DTYPE = "float32" if args_global.dtype=='s' else "float64"      # NOTE: currently not supporting float64 yet
+
+File Path: graphsaint/graph_samplers.py
+Content:
+from graphsaint.globals import *
+import numpy as np
+import scipy.sparse
+import time
+import math
+import pdb
+from math import ceil
+import graphsaint.cython_sampler as cy
+
+
+class GraphSampler:
+    """
+    This is the sampler super-class. Any GraphSAINT sampler is supposed to perform
+    the following meta-steps:
+     1. [optional] Preprocessing: e.g., for edge sampler, we need to calculate the
+            sampling probability for each edge in the training graph. This is to be
+            performed only once per phase (or, once throughout the whole training,
+            since in most cases, training only consists of a single phase. see
+            ../train_config/README.md for definition of a phase).
+            ==> Need to override the `preproc()` in sub-class
+     2. Parallel sampling: launch a batch of graph samplers in parallel and sample
+            subgraphs independently. For efficiency, the actual sampling operation
+            happen in cython. And the classes here is mainly just a wrapper.
+            ==> Need to set self.cy_sampler to the appropriate cython sampler
+              in `__init__()` of the sampler sub-class
+     3. Post-processing: upon getting the sampled subgraphs, we need to prepare the
+            appropriate information (e.g., subgraph adj with renamed indices) to
+            enable the PyTorch trainer. Also, we need to do data conversion from C++
+            to Python (or, mostly numpy). Post-processing is handled within the
+            cython sampling file (./cython_sampler.pyx)
+
+    Pseudo-code for the four proposed sampling algorithms (Node, Edge, RandomWalk,
+    MultiDimRandomWalk) can be found in Appendix, Algo 2 of the GraphSAINT paper.
+
+    Lastly, if you don't bother with writing samplers in cython, you can still code
+    the sampler subclass in pure python. In this case, we have provided a function
+    `_helper_extract_subgraph` for API consistency between python and cython. An
+    example sampler in pure python is provided as `NodeSamplingVanillaPython` at the
+    bottom of this file.
+    """
+    def __init__(self, adj_train, node_train, size_subgraph, args_preproc):
+        """
+        Inputs:
+            adj_train       scipy sparse CSR matrix of the training graph
+            node_train      1D np array storing the indices of the training nodes
+            size_subgraph   int, the (estimated) number of nodes in the subgraph
+            args_preproc    dict, addition arguments needed for pre-processing
+
+        Outputs:
+            None
+        """
+        self.adj_train = adj_train
+        self.node_train = np.unique(node_train).astype(np.int32)
+        # size in terms of number of vertices in subgraph
+        self.size_subgraph = size_subgraph
+        self.name_sampler = 'None'
+        self.node_subgraph = None
+        self.preproc(**args_preproc)
+
+    def preproc(self, **kwargs):
+        pass
+
+    def par_sample(self, stage, **kwargs):
+        return self.cy_sampler.par_sample()
+
+    def _helper_extract_subgraph(self, node_ids):
+        """
+        ONLY used for serial Python sampler (NOT for the parallel cython sampler).
+        Return adj of node-induced subgraph and other corresponding data struct.
+
+        Inputs:
+            node_ids        1D np array, each element is the ID in the original
+                            training graph.
+        Outputs:
+            indptr          np array, indptr of the subg adj CSR
+            indices         np array, indices of the subg adj CSR
+            data            np array, data of the subg adj CSR. Since we have aggregator
+                            normalization, we can simply set all data values to be 1
+            subg_nodes      np array, i-th element stores the node ID of the original graph
+                            for the i-th node in the subgraph. Used to index the full feats
+                            and label matrices.
+            subg_edge_index np array, i-th element stores the edge ID of the original graph
+                            for the i-th edge in the subgraph. Used to index the full array
+                            of aggregation normalization.
+        """
+        node_ids = np.unique(node_ids)
+        node_ids.sort()
+        orig2subg = {n: i for i, n in enumerate(node_ids)}
+        n = node_ids.size
+        indptr = np.zeros(node_ids.size + 1)
+        indices = []
+        subg_edge_index = []
+        subg_nodes = node_ids
+        for nid in node_ids:
+            idx_s, idx_e = self.adj_train.indptr[nid], self.adj_train.indptr[nid + 1]
+            neighs = self.adj_train.indices[idx_s : idx_e]
+            for i_n, n in enumerate(neighs):
+                if n in orig2subg:
+                    indices.append(orig2subg[n])
+                    indptr[orig2subg[nid] + 1] += 1
+                    subg_edge_index.append(idx_s + i_n)
+        indptr = indptr.cumsum().astype(np.int64)
+        indices = np.array(indices)
+        subg_edge_index = np.array(subg_edge_index)
+        data = np.ones(indices.size)
+        assert indptr[-1] == indices.size == subg_edge_index.size
+        return indptr, indices, data, subg_nodes, subg_edge_index
+
+
+# --------------------------------------------------------------------
+# [BELOW] python wrapper for parallel samplers implemented with Cython
+# --------------------------------------------------------------------
+
+class rw_sampling(GraphSampler):
+    """
+    The sampler performs unbiased random walk, by following the steps:
+     1. Randomly pick `size_root` number of root nodes from all training nodes;
+     2. Perform length `size_depth` random walk from the roots. The current node
+            expands the next hop by selecting one of the neighbors uniformly
+            at random;
+     3. Generate node-induced subgraph from the nodes touched by the random walk.
+    """
+    def __init__(self, adj_train, node_train, size_subgraph, size_root, size_depth):
+        """
+        Inputs:
+            adj_train       see super-class
+            node_train      see super-class
+            size_subgraph   see super-class
+            size_root       int, number of root nodes (i.e., number of walkers)
+            size_depth      int, number of hops to take by each walker
+
+        Outputs:
+            None
+        """
+        self.size_root = size_root
+        self.size_depth = size_depth
+        size_subgraph = size_root * size_depth
+        super().__init__(adj_train, node_train, size_subgraph, {})
+        self.cy_sampler = cy.RW(
+            self.adj_train.indptr,
+            self.adj_train.indices,
+            self.node_train,
+            NUM_PAR_SAMPLER,
+            SAMPLES_PER_PROC,
+            self.size_root,
+            self.size_depth
+        )
+
+    def preproc(self, **kwargs):
+        pass
+
+
+class edge_sampling(GraphSampler):
+    def __init__(self,adj_train,node_train,num_edges_subgraph):
+        """
+        The sampler picks edges from the training graph independently, following
+        a pre-computed edge probability distribution. i.e.,
+            p_{u,v} \\propto 1 / deg_u + 1 / deg_v
+        Such prob. dist. is derived to minimize the variance of the minibatch
+        estimator (see Thm 3.2 of the GraphSAINT paper).
+        """
+        self.num_edges_subgraph = num_edges_subgraph
+        # num subgraph nodes may not be num_edges_subgraph * 2 in many cases,
+        # but it is not too important to have an accurate estimation of subgraph
+        # size. So it's probably just fine to use this number.
+        self.size_subgraph = num_edges_subgraph * 2
+        self.deg_train = np.array(adj_train.sum(1)).flatten()
+        self.adj_train_norm = scipy.sparse.dia_matrix((1 / self.deg_train, 0), shape=adj_train.shape).dot(adj_train)
+        super().__init__(adj_train, node_train, self.size_subgraph, {})
+        self.cy_sampler = cy.Edge2(
+            self.adj_train.indptr,
+            self.adj_train.indices,
+            self.node_train,
+            NUM_PAR_SAMPLER,
+            SAMPLES_PER_PROC,
+            self.edge_prob_tri.row,
+            self.edge_prob_tri.col,
+            self.edge_prob_tri.data.cumsum(),
+            self.num_edges_subgraph,
+        )
+
+    def preproc(self,**kwargs):
+        """
+        Compute the edge probability distribution p_{u,v}.
+        """
+        self.edge_prob = scipy.sparse.csr_matrix(
+            (
+                np.zeros(self.adj_train.size),
+                self.adj_train.indices,
+                self.adj_train.indptr
+            ),
+            shape=self.adj_train.shape,
+        )
+        self.edge_prob.data[:] = self.adj_train_norm.data[:]
+        _adj_trans = scipy.sparse.csr_matrix.tocsc(self.adj_train_norm)
+        self.edge_prob.data += _adj_trans.data      # P_e \propto a_{u,v} + a_{v,u}
+        self.edge_prob.data *= 2 * self.num_edges_subgraph / self.edge_prob.data.sum()
+        # now edge_prob is a symmetric matrix, we only keep the
+        # upper triangle part, since adj is assumed to be undirected.
+        self.edge_prob_tri = scipy.sparse.triu(self.edge_prob).astype(np.float32)  # NOTE: in coo format
+
+
+class mrw_sampling(GraphSampler):
+    """
+    A variant of the random walk sampler. The multi-dimensional random walk sampler
+    is proposed in https://www.cs.purdue.edu/homes/ribeirob/pdf/ribeiro_imc2010.pdf
+
+    Fast implementation of the sampler is proposed in https://arxiv.org/abs/1810.11899
+    """
+    def __init__(self, adj_train, node_train, size_subgraph, size_frontier, max_deg=10000):
+        """
+        Inputs:
+            adj_train       see super-class
+            node_train      see super-class
+            size_subgraph   see super-class
+            size_frontier   int, size of the frontier during sampling process. The
+                            size of the frontier is fixed during sampling.
+            max_deg         int, the sampler picks iteratively pick a node from the
+                            frontier by probability proportional to node degree. If
+                            we specify the `max_deg`, we are essentially bounding the
+                            probability of picking any frontier node. This may help
+                            with improving sampling quality for skewed graphs.
+
+        Outputs:
+            None
+        """
+        self.p_dist = None
+        super().__init__(adj_train, node_train, size_subgraph, {})
+        self.size_frontier = size_frontier
+        self.deg_train = np.bincount(self.adj_train.nonzero()[0])
+        self.name_sampler = 'MRW'
+        self.max_deg = int(max_deg)
+        self.cy_sampler = cy.MRW(
+            self.adj_train.indptr,
+            self.adj_train.indices,
+            self.node_train,
+            NUM_PAR_SAMPLER,
+            SAMPLES_PER_PROC,
+            self.p_dist,
+            self.max_deg,
+            self.size_frontier,
+            self.size_subgraph
+        )
+
+    def preproc(self,**kwargs):
+        _adj_hop = self.adj_train
+        self.p_dist = np.array(
+            [
+                _adj_hop.data[_adj_hop.indptr[v] : _adj_hop.indptr[v + 1]].sum()
+                for v in range(_adj_hop.shape[0])
+            ],
+            dtype=np.int32,
+        )
+
+
+class node_sampling(GraphSampler):
+    """
+    Independently pick some nodes from the full training graph, based on
+    pre-computed node probability distribution. The prob. dist. follows
+    Sec 3.4 of the GraphSAINT paper. For detailed derivation, see FastGCN
+    (https://arxiv.org/abs/1801.10247).
+    """
+    def __init__(self, adj_train, node_train, size_subgraph):
+        """
+        Inputs:
+            adj_train       see super-class
+            node_train      see super-class
+            size_subgraph   see super-class
+
+        Outputs:
+            None
+        """
+        self.p_dist = np.zeros(len(node_train))
+        super().__init__(adj_train, node_train, size_subgraph, {})
+        self.cy_sampler = cy.Node(
+            self.adj_train.indptr,
+            self.adj_train.indices,
+            self.node_train,
+            NUM_PAR_SAMPLER,
+            SAMPLES_PER_PROC,
+            self.p_dist,
+            self.size_subgraph,
+        )
+
+    def preproc(self, **kwargs):
+        """
+        Node probability distribution is derived in https://arxiv.org/abs/1801.10247
+        """
+        _p_dist = np.array(
+            [
+                self.adj_train.data[
+                    self.adj_train.indptr[v] : self.adj_train.indptr[v + 1]
+                ].sum()
+                for v in self.node_train
+            ],
+            dtype=np.int64,
+        )
+        self.p_dist = _p_dist.cumsum()
+        if self.p_dist[-1] > 2**31 - 1:
+            print('warning: total deg exceeds 2**31')
+            self.p_dist = self.p_dist.astype(np.float64)
+            self.p_dist /= self.p_dist[-1] / (2**31 - 1)
+        self.p_dist = self.p_dist.astype(np.int32)
+
+
+class full_batch_sampling(GraphSampler):
+    """
+    Strictly speaking, this is not a sampler. It simply returns the full adj
+    matrix of the training graph. This can serve as a baseline to compare
+    full-batch vs. minibatch performance.
+
+    Therefore, the size_subgraph argument is not used here.
+    """
+    def __init__(self, adj_train, node_train, size_subgraph):
+        super().__init__(adj_train, node_train, size_subgraph, {})
+        self.cy_sampler = cy.FullBatch(
+            self.adj_train.indptr,
+            self.adj_train.indices,
+            self.node_train,
+            NUM_PAR_SAMPLER,
+            SAMPLES_PER_PROC,
+        )
+
+
+# --------------------------------------------
+# [BELOW] Example sampler based on pure python
+# --------------------------------------------
+
+class NodeSamplingVanillaPython(GraphSampler):
+    """
+    This class is just to showcase how you can write the graph sampler in pure python.
+
+    The simplest and most basic sampler: just pick nodes uniformly at random and return the
+    node-induced subgraph.
+    """
+    def __init__(self, adj_train, node_train, size_subgraph):
+        super().__init__(adj_train, node_train, size_subgraph, {})
+
+    def par_sample(self, stage, **kwargs):
+        node_ids = np.random.choice(self.node_train, self.size_subgraph)
+        ret = self._helper_extract_subgraph(node_ids)
+        ret = list(ret)
+        for i in range(len(ret)):
+            ret[i] = [ret[i]]
+        return ret
+
+    def preproc(self):
+        pass
+
+File Path: graphsaint/metric.py
+Content:
+from sklearn import metrics
+import numpy as np
+
+
+def calc_f1(y_true, y_pred,is_sigmoid):
+    if not is_sigmoid:
+        y_true = np.argmax(y_true, axis=1)
+        y_pred = np.argmax(y_pred, axis=1)
+    else:
+        y_pred[y_pred > 0.5] = 1
+        y_pred[y_pred <= 0.5] = 0
+    return metrics.f1_score(y_true, y_pred, average="micro"), metrics.f1_score(y_true, y_pred, average="macro")
+
+
+
+File Path: graphsaint/open_graph_benchmark/train_ogbn-products.py
+Content:
+"""
+See README in the current directory and in the root directory for training instructions. 
+The graph format is converted via data/open_graph_benchmark/ogbn_converter.py
+Implementation is based on the PyTorch version.
+
+Contact: 
+
+Hanqing Zeng (zengh@usc.edu);   Hongkuan Zhou (hongkuaz@usc.edu)
+"""
+
+from graphsaint.globals import *
+from graphsaint.pytorch_version.models import GraphSAINT
+from graphsaint.pytorch_version.minibatch import Minibatch
+from graphsaint.utils import *
+from graphsaint.metric import *
+from graphsaint.pytorch_version.utils import *
+from  ogb.nodeproppred import Evaluator
+
+import torch
+import time
+
+evaluator=Evaluator(name='ogbn-products')
+
+def evaluate_full_batch(model, minibatch, mode='val'):
+    """
+    Full batch evaluation: for validation and test sets only.
+        When calculating the F1 score, we will mask the relevant root nodes
+        (e.g., those belonging to the val / test sets).
+    """
+    loss,preds,labels = model.eval_step(*minibatch.one_batch(mode=mode))
+    if mode == 'val':
+        node_target = [minibatch.node_val]
+    elif mode == 'test':
+        node_target = [minibatch.node_test]
+    else:
+        assert mode == 'valtest'
+        node_target = [minibatch.node_val, minibatch.node_test]
+    labels = labels.argmax(dim=-1, keepdim=True)
+    preds = preds.argmax(dim=-1, keepdim=True)
+    f1mic, f1mac = [], []
+    for n in node_target:
+        acc = evaluator.eval({'y_true': labels[n], 'y_pred': preds[n]})['acc']
+        f1mic.append(acc)
+        f1mac.append(acc)
+    f1mic = f1mic[0] if len(f1mic)==1 else f1mic
+    f1mac = f1mac[0] if len(f1mac)==1 else f1mac
+    # loss is not very accurate in this case, since loss is also contributed by training nodes
+    # on the other hand, for val / test, we mostly care about their accuracy only.
+    # so the loss issue is not a problem.
+    return loss, f1mic, f1mac
+
+
+
+def prepare(train_data,train_params,arch_gcn):
+    """
+    Prepare some data structure and initialize model / minibatch handler before
+    the actual iterative training taking place.
+    """
+    adj_full, adj_train, feat_full, class_arr,role = train_data
+    adj_full = adj_full.astype(np.int32)
+    adj_train = adj_train.astype(np.int32)
+    adj_full_norm = adj_norm(adj_full)
+    num_classes = class_arr.shape[1]
+
+    minibatch = Minibatch(adj_full_norm, adj_train, role, train_params)
+    model = GraphSAINT(num_classes, arch_gcn, train_params, feat_full, class_arr)
+    printf("TOTAL NUM OF PARAMS = {}".format(sum(p.numel() for p in model.parameters())), style="yellow")
+    minibatch_eval=Minibatch(adj_full_norm, adj_train, role, train_params, cpu_eval=True)
+    model_eval=GraphSAINT(num_classes, arch_gcn, train_params, feat_full, class_arr, cpu_eval=True)
+    if args_global.gpu >= 0:
+        model = model.cuda()
+    return model, minibatch, minibatch_eval, model_eval
+
+
+def train(train_phases, model, minibatch, minibatch_eval, model_eval, eval_val_every):
+    if not args_global.cpu_eval:
+        minibatch_eval=minibatch
+    epoch_ph_start = 0
+    f1mic_best, ep_best = 0, -1
+    time_train = 0
+    dir_saver = '{}/pytorch_models'.format(args_global.dir_log)
+    path_saver = '{}/pytorch_models/saved_model_{}.pkl'.format(args_global.dir_log, timestamp)
+    for ip, phase in enumerate(train_phases):
+        printf('START PHASE {:4d}'.format(ip),style='underline')
+        minibatch.set_sampler(phase)
+        num_batches = minibatch.num_training_batches()
+        for e in range(epoch_ph_start, int(phase['end'])):
+            printf('Epoch {:4d}'.format(e),style='bold')
+            minibatch.shuffle()
+            l_loss_tr, l_f1mic_tr, l_f1mac_tr = [], [], []
+            time_train_ep = 0
+            while not minibatch.end():
+                t1 = time.time()
+                loss_train,preds_train,labels_train = model.train_step(*minibatch.one_batch(mode='train'))
+                time_train_ep += time.time() - t1
+                if not minibatch.batch_num % args_global.eval_train_every:
+                    f1_mic, f1_mac = calc_f1(to_numpy(labels_train),to_numpy(preds_train),model.sigmoid_loss)
+                    l_loss_tr.append(loss_train)
+                    l_f1mic_tr.append(f1_mic)
+                    l_f1mac_tr.append(f1_mac)
+            if (e+1)%eval_val_every == 0:
+                if args_global.cpu_eval:
+                    torch.save(model.state_dict(),'tmp.pkl')
+                    model_eval.load_state_dict(torch.load('tmp.pkl',map_location=lambda storage, loc: storage))
+                else:
+                    model_eval = model
+                loss_val, f1mic_val, f1mac_val = evaluate_full_batch(model_eval, minibatch_eval, mode='val')
+                printf(' TRAIN (Ep avg): loss = {:.4f}\tmic = {:.4f}\tmac = {:.4f}\ttrain time = {:.4f} sec'\
+                        .format(f_mean(l_loss_tr), f_mean(l_f1mic_tr), f_mean(l_f1mac_tr), time_train_ep))
+                printf(' VALIDATION:     loss = {:.4f}\tmic = {:.4f}\tmac = {:.4f}'\
+                        .format(loss_val, f1mic_val, f1mac_val), style='yellow')
+                if f1mic_val > f1mic_best:
+                    f1mic_best, ep_best = f1mic_val, e
+                    if not os.path.exists(dir_saver):
+                        os.makedirs(dir_saver)
+                    printf('  Saving model ...', style='yellow')
+                    torch.save(model.state_dict(), path_saver)
+            time_train += time_train_ep
+        epoch_ph_start = int(phase['end'])
+    printf("Optimization Finished!", style="yellow")
+    if ep_best >= 0:
+        if args_global.cpu_eval:
+            model_eval.load_state_dict(torch.load(path_saver, map_location=lambda storage, loc: storage))
+        else:
+            model.load_state_dict(torch.load(path_saver))
+            model_eval=model
+        printf('  Restoring model ...', style='yellow')
+    loss, f1mic_both, f1mac_both = evaluate_full_batch(model_eval, minibatch_eval, mode='valtest')
+    f1mic_val, f1mic_test = f1mic_both
+    f1mac_val, f1mac_test = f1mac_both
+    printf("Full validation (Epoch {:4d}): \n  F1_Micro = {:.4f}\tF1_Macro = {:.4f}"\
+            .format(ep_best, f1mic_val, f1mac_val), style='red')
+    printf("Full test stats: \n  F1_Micro = {:.4f}\tF1_Macro = {:.4f}"\
+            .format(f1mic_test, f1mac_test), style='red')
+    printf("Total training time: {:6.2f} sec".format(time_train), style='red')
+    return f1mic_test
+
+
+if __name__ == '__main__':
+    log_dir(args_global.train_config, args_global.data_prefix, git_branch, git_rev, timestamp)
+    train_params, train_phases, train_data, arch_gcn = parse_n_prepare(args_global)
+    if 'eval_val_every' not in train_params:
+        train_params['eval_val_every'] = EVAL_VAL_EVERY_EP
+    test_accs = list()
+    for run in range(10):
+        print(f'>>>>>> Run {run:02d}:')
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
+        print('memory allocated:', torch.cuda.memory_allocated())
+        print('memory reserved: ', torch.cuda.max_memory_reserved())
+        model, minibatch, minibatch_eval, model_eval = prepare(train_data, train_params, arch_gcn)
+        test_acc = train(train_phases, model, minibatch, minibatch_eval, model_eval,train_params['eval_val_every'])
+        test_accs.append(test_acc)
+    test_acc = torch.tensor(test_accs)
+    print('============================')
+    print(f'Final Test: {test_acc.mean():.4f} ± {test_acc.std():.4f}')
+    
+
+File Path: graphsaint/pytorch_version/layers.py
+Content:
+import torch
+from torch import nn
+import scipy.sparse as sp
+
+
+F_ACT = {'relu': nn.ReLU(),
+         'I': lambda x:x}
+
+"""
+NOTE
+    For the various GNN layers, we optionally support batch normalization. Yet, due to the
+    non-IID nature of GNN samplers (whether it is graph-sampling or layer sampling based),
+    we may need some modification to the standard batch-norm layer operations to achieve
+    optimal accuracy on graphs.
+
+    The study of optimal GNN-based batch-norm is out-of-scope for the current version of
+    GraphSAINT. So as a compromise, we provide multiple implementations of batch-norm
+    layer which can be optionally inserted at the output of the GNN layers.
+
+Specifically, we have the various choices for the <bias> field in the layer classes
+    'bias'          means no batch-norm is applied. Only add the bias to the hidden
+                    features of the GNN layer.
+    'norm'          means we calculate the mean and variance of the GNN hidden features,
+                    and then scale the hidden features manually by the mean and variance.
+                    In this case, we need explicitly create the 'offset' and 'scale' params.
+    'norm-nn'       means we use the torch.nn.BatchNorm1d layer implemented by torch.
+                    In this case, no need to explicitly maintain the BN internal params.
+"""
+
+
+class HighOrderAggregator(nn.Module):
+    def __init__(self, dim_in, dim_out, dropout=0., act='relu', \
+            order=1, aggr='mean', bias='norm-nn', **kwargs):
+        """
+        Layer implemented here combines the GraphSAGE-mean [1] layer with MixHop [2] layer.
+        We define the concept of `order`: an order-k layer aggregates neighbor information
+        from 0-hop all the way to k-hop. The operation is approximately:
+            X W_0 [+] A X W_1 [+] ... [+] A^k X W_k
+        where [+] is some aggregation operation such as addition or concatenation.
+
+        Special cases:
+            Order = 0  -->  standard MLP layer
+            Order = 1  -->  standard GraphSAGE layer
+
+        [1]: https://cs.stanford.edu/people/jure/pubs/graphsage-nips17.pdf
+        [2]: https://arxiv.org/abs/1905.00067
+
+        Inputs:
+            dim_in      int, feature dimension for input nodes
+            dim_out     int, feature dimension for output nodes
+            dropout     float, dropout on weight matrices W_0 to W_k
+            act         str, activation function. See F_ACT at the top of this file
+            order       int, see definition above
+            aggr        str, if 'mean' then [+] operation adds features of various hops
+                            if 'concat' then [+] concatenates features of various hops
+            bias        str, if 'bias' then apply a bias vector to features of each hop
+                            if 'norm' then perform batch-normalization on output features
+
+        Outputs:
+            None
+        """
+        super(HighOrderAggregator,self).__init__()
+        assert bias in ['bias', 'norm', 'norm-nn']
+        self.order, self.aggr = order, aggr
+        self.act, self.bias = F_ACT[act], bias
+        self.dropout = dropout
+        self.f_lin, self.f_bias = [], []
+        self.offset, self.scale = [], []
+        self.num_param = 0
+        for o in range(self.order + 1):
+            self.f_lin.append(nn.Linear(dim_in, dim_out, bias=False))
+            nn.init.xavier_uniform_(self.f_lin[-1].weight)
+            self.f_bias.append(nn.Parameter(torch.zeros(dim_out)))
+            self.num_param += dim_in * dim_out
+            self.num_param += dim_out
+            self.offset.append(nn.Parameter(torch.zeros(dim_out)))
+            self.scale.append(nn.Parameter(torch.ones(dim_out)))
+            if self.bias == 'norm' or self.bias == 'norm-nn':
+                self.num_param += 2 * dim_out
+        self.f_lin = nn.ModuleList(self.f_lin)
+        self.f_dropout = nn.Dropout(p=self.dropout)
+        self.params = nn.ParameterList(self.f_bias + self.offset + self.scale)
+        self.f_bias = self.params[:self.order + 1]
+        if self.bias == 'norm':
+            self.offset = self.params[self.order + 1 : 2 * self.order + 2]
+            self.scale = self.params[2 * self.order + 2 : ]
+        elif self.bias == 'norm-nn':
+            final_dim_out = dim_out * ((aggr=='concat') * (order + 1) + (aggr=='mean'))
+            self.f_norm = nn.BatchNorm1d(final_dim_out, eps=1e-9, track_running_stats=True)
+        self.num_param = int(self.num_param)
+
+    def _spmm(self, adj_norm, _feat):
+        """ sparce feature matrix multiply dense feature matrix """
+        # alternative ways: use geometric.propagate or torch.mm
+        return torch.sparse.mm(adj_norm, _feat)
+
+    def _f_feat_trans(self, _feat, _id):
+        feat = self.act(self.f_lin[_id](_feat) + self.f_bias[_id])
+        if self.bias == 'norm':
+            mean = feat.mean(dim=1).view(feat.shape[0],1)
+            var = feat.var(dim=1, unbiased=False).view(feat.shape[0], 1) + 1e-9
+            feat_out = (feat - mean) * self.scale[_id] * torch.rsqrt(var) + self.offset[_id]
+        else:
+            feat_out = feat
+        return feat_out
+
+    def forward(self, inputs):
+        """
+        Inputs:.
+            adj_norm        normalized adj matrix of the subgraph
+            feat_in         2D matrix of input node features
+
+        Outputs:
+            adj_norm        same as input (to facilitate nn.Sequential)
+            feat_out        2D matrix of output node features
+        """
+        adj_norm, feat_in = inputs
+        feat_in = self.f_dropout(feat_in)
+        feat_hop = [feat_in]
+        # generate A^i X
+        for o in range(self.order):
+            # propagate(edge_index, x=x, norm=norm)
+            feat_hop.append(self._spmm(adj_norm, feat_hop[-1]))
+        feat_partial = [self._f_feat_trans(ft, idf) for idf, ft in enumerate(feat_hop)]
+        if self.aggr == 'mean':
+            feat_out = feat_partial[0]
+            for o in range(len(feat_partial) - 1):
+                feat_out += feat_partial[o + 1]
+        elif self.aggr == 'concat':
+            feat_out = torch.cat(feat_partial, 1)
+        else:
+            raise NotImplementedError
+        if self.bias == 'norm-nn':
+            feat_out = self.f_norm(feat_out)
+        return adj_norm, feat_out       # return adj_norm to support Sequential
+
+
+class JumpingKnowledge(nn.Module):
+    def __init__(self):
+        """
+        To be added soon. For now please see the tensorflow version for JK layers
+        """
+        pass
+
+
+class AttentionAggregator(nn.Module):
+    """
+    This layer follows the design of Graph Attention Network (GAT: https://arxiv.org/abs/1710.10903).
+    We extend GAT to higher order as well (see the HighOrderAggregator class above), even though most
+    of the time, order-1 layer should be sufficient. The enhancement to SAGE-mean architecture is
+    that GAT performs *weighted* aggregation on neighbor features. The edge weight is generated by
+    additional learnable MLP layer. Such weight means "attention". GAT proposed multi-head attention
+    so that there can be multiple weights for each edge. The k-head attention can be speficied by the
+    `mulhead` parameter.
+
+    Note that
+     1. In GraphSAINT minibatch training, we remove the softmax normalization across the neighbors.
+        Reason: since the minibatch does not see the full neighborhood, softmax does not make much
+        sense now. We see significant accuracy improvement by removing the softmax step. See also
+        Equations 8 and 9, Appendix C.3 of GraphSAINT (https://arxiv.org/pdf/1907.04931.pdf).
+     2. For order > 1, we obtain attention from neighbors from lower order up to higher order.
+
+     Inputs:
+        dim_in      int, feature dimension for input nodes
+        dim_out     int, feature dimension for output nodes
+        dropout     float, dropout on weight matrices W_0 to W_k
+        act         str, activation function. See F_ACT at the top of this file
+        order       int, see definition in HighOrderAggregator
+        aggr        str, if 'mean' then [+] operation adds features of various hops
+                         if 'concat' then [+] concatenates features of various hops
+        bias        str, if 'bias' then apply a bias vector to features of each hop
+                         if 'norm' then perform batch-normalization on output features
+        mulhead     int, the number of heads for attention
+
+    Outputs:
+        None
+    """
+    def __init__(self, dim_in, dim_out, dropout=0., act='relu', \
+            order=1, aggr='mean', bias='norm', mulhead=1):
+        super(AttentionAggregator,self).__init__()
+        assert bias in ['bias', 'norm', 'norm-nn']
+        self.num_param = 0
+        self.mulhead = mulhead
+        self.order, self.aggr = order, aggr
+        self.act, self.bias = F_ACT[act], bias
+        self.att_act = nn.LeakyReLU(negative_slope=0.2)
+        self.dropout = dropout
+        self._f_lin = []
+        self._offset, self._scale = [], []
+        self._attention = []
+        # mostly we have order = 1 for GAT
+        # "+1" since we do batch norm of order-0 and order-1 outputs separately
+        for o in range(self.order+1):
+            for i in range(self.mulhead):
+                self._f_lin.append(nn.Linear(dim_in, int(dim_out / self.mulhead), bias=True))
+                nn.init.xavier_uniform_(self._f_lin[-1].weight)
+                # _offset and _scale are for 'norm' type of batch norm
+                self._offset.append(nn.Parameter(torch.zeros(int(dim_out / self.mulhead))))
+                self._scale.append(nn.Parameter(torch.ones(int(dim_out / self.mulhead))))
+                self.num_param += dim_in * dim_out / self.mulhead + 2 * dim_out / self.mulhead
+                if o < self.order:
+                    self._attention.append(nn.Parameter(torch.ones(1, int(dim_out / self.mulhead * 2))))
+                    nn.init.xavier_uniform_(self._attention[-1])
+                    self.num_param += dim_out / self.mulhead * 2
+        self.mods = nn.ModuleList(self._f_lin)
+        self.f_dropout = nn.Dropout(p=self.dropout)
+        self.params = nn.ParameterList(self._offset + self._scale + self._attention)
+        self.f_lin = []
+        self.offset, self.scale = [], []
+        self.attention = []
+        # We need traverse order and mulhead the second time, just because we want to support
+        # higher order. Reason: if we have torch parameters in a python list, i.e.:
+        #       [nn.Parameter(), nn.Parameter(), ...]
+        # PyTorch cannot automically add these parameters into the learnable parameters.
+        for o in range(self.order+1):
+            self.f_lin.append([])
+            self.offset.append([])
+            self.scale.append([])
+            self.attention.append([])
+            for i in range(self.mulhead):
+                self.f_lin[-1].append(self.mods[o * self.mulhead + i])
+                if self.bias == 'norm':     # not used in 'norm-nn' mode
+                    self.offset[-1].append(self.params[o * self.mulhead + i])
+                    self.scale[-1].append(self.params[len(self._offset) + o * self.mulhead + i])
+                if o < self.order:      # excluding the order-0 part
+                    self.attention[-1].append(self.params[len(self._offset) * 2 + o * self.mulhead + i])
+        if self.bias == 'norm-nn':
+            final_dim_out = dim_out*((aggr=='concat')*(order+1) + (aggr=='mean'))
+            self.f_norm = nn.BatchNorm1d(final_dim_out, eps=1e-9, track_running_stats=True)
+        self.num_param = int(self.num_param)
+
+    def _spmm(self, adj_norm, _feat):
+        return torch.sparse.mm(adj_norm, _feat)
+
+    def _f_feat_trans(self, _feat, f_lin):
+        feat_out = []
+        for i in range(self.mulhead):
+            feat_out.append(self.act(f_lin[i](_feat)))
+        return feat_out
+
+    def _aggregate_attention(self, adj, feat_neigh, feat_self, attention):
+        attention_self = self.att_act(attention[:, : feat_self.shape[1]].mm(feat_self.t())).squeeze()
+        attention_neigh = self.att_act(attention[:, feat_neigh.shape[1] :].mm(feat_neigh.t())).squeeze()
+        attention_norm = (attention_self[adj._indices()[0]] + attention_neigh[adj._indices()[1]]) * adj._values()
+        att_adj = torch.sparse.FloatTensor(adj._indices(), attention_norm, torch.Size(adj.shape))
+        return self._spmm(att_adj, feat_neigh)
+
+    def forward(self, inputs):
+        """
+        Inputs:
+            inputs          tuple / list of two elements:
+                            1. feat_in: 2D matrix of node features input to the layer
+                            2. adj_norm: normalized subgraph adj. Normalization should
+                               consider both the node degree and aggregation normalization
+
+        Outputs:
+            feat_out        2D matrix of features for output nodes of the layer
+            adj_norm        normalized adj same as the input. We have to return it to
+                            support nn.Sequential called in models.py
+        """
+        adj_norm, feat_in = inputs
+        feat_in = self.f_dropout(feat_in)
+        # generate A^i X
+        feat_partial = []
+        for o in range(self.order + 1):
+            feat_partial.append(self._f_feat_trans(feat_in, self.f_lin[o]))
+        for o in range(1,self.order + 1):
+            for s in range(o):
+                for i in range(self.mulhead):
+                    feat_partial[o][i] = self._aggregate_attention(
+                        adj_norm,
+                        feat_partial[o][i],
+                        feat_partial[o - s - 1][i],
+                        self.attention[o-1][i],
+                    )
+        if self.bias == 'norm':
+            # normalize per-order, per-head
+            for o in range(self.order + 1):
+                for i in range(self.mulhead):
+                    mean = feat_partial[o][i].mean(dim=1).unsqueeze(1)
+                    var = feat_partial[o][i].var(dim=1, unbiased=False).unsqueeze(1) + 1e-9
+                    feat_partial[o][i] = (feat_partial[o][i] - mean) \
+                                * self.scale[o][i] * torch.rsqrt(var) + self.offset[o][i]
+
+        for o in range(self.order + 1):
+            feat_partial[o] = torch.cat(feat_partial[o], 1)
+        if self.aggr == 'mean':
+            feat_out = feat_partial[0]
+            for o in range(len(feat_partial) - 1):
+                feat_out += feat_partial[o + 1]
+        elif self.aggr == 'concat':
+            feat_out = torch.cat(feat_partial, 1)
+        else:
+            raise NotImplementedError
+        if self.bias == 'norm-nn':
+            feat_out = self.f_norm(feat_out)
+        return adj_norm, feat_out
+
+
+class GatedAttentionAggregator(nn.Module):
+    """
+    Gated attentionn network (GaAN: https://arxiv.org/pdf/1803.07294.pdf).
+    The general idea of attention is similar to GAT. The main difference is that GaAN adds
+    a gated weight for each attention head. Therefore, we can selectively pick important
+    heads for better expressive power. Note that this layer is quite expensive to execute,
+    since the operations to compute attention are complicated. Therefore, we only support
+    order <= 1 (See HighOrderAggregator for definition of order).
+
+    Inputs:
+        dim_in      int, feature dimension for input nodes
+        dim_out     int, feature dimension for output nodes
+        dropout     float, dropout on weight matrices W_0 to W_k
+        act         str, activation function. See F_ACT at the top of this file
+        order       int, see definition in HighOrderAggregator
+        aggr        str, if 'mean' then [+] operation adds features of various hops
+                         if 'concat' then [+] concatenates features of various hops
+        bias        str, if 'bias' then apply a bias vector to features of each hop
+                         if 'norm' then perform batch-normalization on output features
+        mulhead     int, the number of heads for attention
+        dim_gate    int, output dimension of theta_m during gate value calculation
+
+    Outputs:
+        None
+    """
+
+    def __init__(
+        self,
+        dim_in,
+        dim_out,
+        dropout=0.0,
+        act="relu",
+        order=1,
+        aggr="mean",
+        bias="norm",
+        mulhead=1,
+        dim_gate=64,
+    ):
+        super(GatedAttentionAggregator, self).__init__()
+        self.num_param = 0      # TODO: update param count
+        self.multi_head = mulhead
+        assert self.multi_head > 0 and dim_out % self.multi_head == 0
+        self.order, self.aggr = order, aggr
+        self.act, self.bias = F_ACT[act], bias
+        self.att_act = nn.LeakyReLU(negative_slope=0.2)
+        self.dropout = dropout
+        self.dim_gate = dim_gate
+        self._f_lin = []
+        self._offset, self._scale = [], []
+        self._attention = []
+        for i in range(self.order + 1):
+            self._offset.append(nn.Parameter(torch.zeros(dim_out)))
+            self._scale.append(nn.Parameter(torch.ones(dim_out)))
+            for _j in range(self.multi_head):
+                self._f_lin.append(
+                    nn.Linear(dim_in, int(dim_out / self.multi_head), bias=True)
+                )
+                nn.init.xavier_uniform_(self._f_lin[-1].weight)
+                if i < self.order:
+                    self._attention.append(
+                        nn.Parameter(torch.ones(1, int(dim_out / self.multi_head * 2)))
+                    )
+                    nn.init.xavier_uniform_(self._attention[-1])
+        self._weight_gate = nn.Parameter(
+            torch.ones(dim_in * 2 + dim_gate, self.multi_head)
+        )
+        nn.init.xavier_uniform_(self._weight_gate)
+        self._weight_pool_gate = nn.Parameter(torch.ones(dim_in, dim_gate))
+        nn.init.xavier_uniform_(self._weight_pool_gate)
+        self.mods = nn.ModuleList(self._f_lin)
+        self.f_dropout = nn.Dropout(p=self.dropout)
+        self.params = nn.ParameterList(
+            self._offset
+            + self._scale
+            + self._attention
+            + [self._weight_gate, self._weight_pool_gate]
+        )
+        self.f_lin = []
+        self.offset, self.scale = [], []
+        self.attention = []
+        for i in range(self.order + 1):
+            self.f_lin.append([])
+            self.attention.append([])
+            self.offset.append(self.params[i])
+            self.scale.append(self.params[len(self._offset) + i])
+            for j in range(self.multi_head):
+                self.f_lin[-1].append(self.mods[i * self.multi_head + j])
+                if i < self.order:
+                    self.attention[-1].append(
+                        self.params[len(self._offset) * 2 + i * self.multi_head + j]
+                    )
+        self.weight_gate = self.params[-2]
+        self.weight_pool_gate = self.params[-1]
+
+    def _spmm(self, adj_norm, _feat):
+        return torch.sparse.mm(adj_norm, _feat)
+
+    def _f_feat_trans(self, _feat, f_lin):
+        feat_out = []
+        for i in range(self.multi_head):
+            feat_out.append(self.act(f_lin[i](_feat)))
+        return feat_out
+
+    def _aggregate_attention(self, adj, feat_neigh, feat_self, attention):
+        attention_self = self.att_act(
+            attention[:, : feat_self.shape[1]].mm(feat_self.t())
+        ).squeeze()
+        attention_neigh = self.att_act(
+            attention[:, feat_neigh.shape[1] :].mm(feat_neigh.t())
+        ).squeeze()
+        att_adj = torch.sparse.FloatTensor(
+            adj._indices(),
+            (attention_self[adj._indices()[0]] + attention_neigh[adj._indices()[1]])
+            * adj._values(),
+            torch.Size(adj.shape),
+        )
+        return self._spmm(att_adj, feat_neigh)
+
+    def _batch_norm(self, feat):
+        for i in range(self.order + 1):
+            mean = feat[i].mean(dim=1).unsqueeze(1)
+            var = feat[i].var(dim=1, unbiased=False).unsqueeze(1) + 1e-9
+            feat[i] = (feat[i] - mean) * self.scale[i] * torch.rsqrt(var) \
+                    + self.offset[i]
+        return feat
+
+    def _compute_gate_value(self, adj, feat, adj_sp_csr):
+        """
+        See equation (3) of the GaAN paper. Gate value is applied in front of each head.
+        Symbols such as zj follows the equations in the paper.
+        """
+        zj = feat.mm(self.weight_pool_gate)
+        neigh_zj = []
+        # use loop instead since torch does not support sparse tensor slice
+        for i in range(adj.shape[0]):
+            if adj_sp_csr.indptr[i] < adj_sp_csr.indptr[i + 1]:
+                neigh_zj.append(
+                    torch.max(
+                        zj[
+                            adj_sp_csr.indices[
+                                adj_sp_csr.indptr[i] : adj_sp_csr.indptr[i + 1]
+                            ]
+                        ],
+                        0,
+                    )[0].unsqueeze(0)
+                )
+            else:
+                if zj.is_cuda:
+                    neigh_zj.append(torch.zeros(1, self.dim_gate).cuda())
+                else:
+                    neigh_zj.append(torch.zeros(1, self.dim_gate))
+        neigh_zj = torch.cat(neigh_zj, 0)
+        neigh_mean = self._spmm(adj, feat)
+        gate_feat = torch.cat([feat, neigh_zj, neigh_mean], 1)
+        return gate_feat.mm(self.weight_gate)
+
+    def forward(self, inputs):
+        """
+        Inputs:
+            inputs          tuple / list of two elements:
+                            1. adj_norm: normalized subgraph adj. Normalization should
+                               consider both the node degree and aggregation normalization
+                            2. feat_in: 2D matrix of node features input to the layer
+
+        Outputs:
+            feat_out        2D matrix of features for output nodes of the layer
+            adj_norm        normalized adj same as the input. We have to return it to
+                            support nn.Sequential called in models.py
+        """
+        adj_norm, feat_in = inputs
+        feat_in = self.f_dropout(feat_in)
+        # compute gate value
+        adj_norm_cpu = adj_norm.cpu()
+        adj_norm_sp_csr = sp.coo_matrix(
+            (
+                adj_norm_cpu._values().numpy(),
+                (
+                    adj_norm_cpu._indices()[0].numpy(),
+                    adj_norm_cpu._indices()[1].numpy(),
+                ),
+            ),
+            shape=(adj_norm.shape[0], adj_norm.shape[0]),
+        ).tocsr()
+        gate_value = self._compute_gate_value(adj_norm, feat_in, adj_norm_sp_csr)
+        feat_partial = []
+        for i in range(self.order + 1):
+            feat_partial.append(self._f_feat_trans(feat_in, self.f_lin[i]))
+        for i in range(1, self.order + 1):
+            for j in range(i):
+                for k in range(self.multi_head):
+                    feat_partial[i][k] = self._aggregate_attention(
+                        adj_norm,
+                        feat_partial[i][k],
+                        feat_partial[i - j - 1][k],
+                        self.attention[i - 1][k],
+                    )
+                    feat_partial[i][k] *= gate_value[:, k].unsqueeze(1)
+        for i in range(self.order + 1):
+            feat_partial[i] = torch.cat(feat_partial[i], 1)
+        # if norm before concatenation, gate value vanishes
+        if self.bias == "norm":
+            feat_partial = self._batch_norm(feat_partial)
+        if self.aggr == "mean":
+            feat_out = feat_partial[0]
+            for i in range(len(feat_partial) - 1):
+                feat_out += feat_partial[i + 1]
+        elif self.aggr == "concat":
+            feat_out = torch.cat(feat_partial, 1)
+        else:
+            raise NotImplementedError
+        return adj_norm, feat_out
+
+File Path: graphsaint/pytorch_version/minibatch.py
+Content:
+from graphsaint.globals import *
+import math
+from graphsaint.utils import *
+from graphsaint.graph_samplers import *
+from graphsaint.norm_aggr import *
+import torch
+import scipy.sparse as sp
+import scipy
+
+import numpy as np
+import time
+
+
+
+def _coo_scipy2torch(adj):
+    """
+    convert a scipy sparse COO matrix to torch
+    """
+    values = adj.data
+    indices = np.vstack((adj.row, adj.col))
+    i = torch.LongTensor(indices)
+    v = torch.FloatTensor(values)
+    return torch.sparse.FloatTensor(i,v, torch.Size(adj.shape))
+
+
+
+class Minibatch:
+    """
+    Provides minibatches for the trainer or evaluator. This class is responsible for
+    calling the proper graph sampler and estimating normalization coefficients.
+    """
+    def __init__(self, adj_full_norm, adj_train, role, train_params, cpu_eval=False):
+        """
+        Inputs:
+            adj_full_norm       scipy CSR, adj matrix for the full graph (row-normalized)
+            adj_train           scipy CSR, adj matrix for the traing graph. Since we are
+                                under transductive setting, for any edge in this adj,
+                                both end points must be training nodes.
+            role                dict, key 'tr' -> list of training node IDs;
+                                      key 'va' -> list of validation node IDs;
+                                      key 'te' -> list of test node IDs.
+            train_params        dict, additional parameters related to training. e.g.,
+                                how many subgraphs we want to get to estimate the norm
+                                coefficients.
+            cpu_eval            bool, whether or not we want to run full-batch evaluation
+                                on the CPU.
+
+        Outputs:
+            None
+        """
+        self.use_cuda = (args_global.gpu >= 0)
+        if cpu_eval:
+            self.use_cuda=False
+
+        self.node_train = np.array(role['tr'])
+        self.node_val = np.array(role['va'])
+        self.node_test = np.array(role['te'])
+
+        self.adj_full_norm = _coo_scipy2torch(adj_full_norm.tocoo())
+        self.adj_train = adj_train
+        # -----------------------
+        # sanity check (optional)
+        # -----------------------
+        #for role_set in [self.node_val, self.node_test]:
+        #    for v in role_set:
+        #        assert self.adj_train.indptr[v+1] == self.adj_train.indptr[v]
+        #_adj_train_T = sp.csr_matrix.tocsc(self.adj_train)
+        #assert np.abs(_adj_train_T.indices - self.adj_train.indices).sum() == 0
+        #assert np.abs(_adj_train_T.indptr - self.adj_train.indptr).sum() == 0
+        #_adj_full_T = sp.csr_matrix.tocsc(adj_full_norm)
+        #assert np.abs(_adj_full_T.indices - adj_full_norm.indices).sum() == 0
+        #assert np.abs(_adj_full_T.indptr - adj_full_norm.indptr).sum() == 0
+        #printf("SANITY CHECK PASSED", style="yellow")
+        if self.use_cuda:
+            # now i put everything on GPU. Ideally, full graph adj/feat
+            # should be optionally placed on CPU
+            self.adj_full_norm = self.adj_full_norm.cuda()
+
+        # below: book-keeping for mini-batch
+        self.node_subgraph = None
+        self.batch_num = -1
+
+        self.method_sample = None
+        self.subgraphs_remaining_indptr = []
+        self.subgraphs_remaining_indices = []
+        self.subgraphs_remaining_data = []
+        self.subgraphs_remaining_nodes = []
+        self.subgraphs_remaining_edge_index = []
+
+        self.norm_loss_train = np.zeros(self.adj_train.shape[0])
+        # norm_loss_test is used in full batch evaluation (without sampling).
+        # so neighbor features are simply averaged.
+        self.norm_loss_test = np.zeros(self.adj_full_norm.shape[0])
+        _denom = len(self.node_train) + len(self.node_val) +  len(self.node_test)
+        self.norm_loss_test[self.node_train] = 1. / _denom
+        self.norm_loss_test[self.node_val] = 1. / _denom
+        self.norm_loss_test[self.node_test] = 1. / _denom
+        self.norm_loss_test = torch.from_numpy(self.norm_loss_test.astype(np.float32))
+        if self.use_cuda:
+            self.norm_loss_test = self.norm_loss_test.cuda()
+        self.norm_aggr_train = np.zeros(self.adj_train.size)
+
+        self.sample_coverage = train_params['sample_coverage']
+        self.deg_train = np.array(self.adj_train.sum(1)).flatten()
+
+    def set_sampler(self, train_phases):
+        """
+        Pick the proper graph sampler. Run the warm-up phase to estimate
+        loss / aggregation normalization coefficients.
+
+        Inputs:
+            train_phases       dict, config / params for the graph sampler
+
+        Outputs:
+            None
+        """
+        self.subgraphs_remaining_indptr = []
+        self.subgraphs_remaining_indices = []
+        self.subgraphs_remaining_data = []
+        self.subgraphs_remaining_nodes = []
+        self.subgraphs_remaining_edge_index = []
+        self.method_sample = train_phases['sampler']
+        if self.method_sample == 'mrw':
+            if 'deg_clip' in train_phases:
+                _deg_clip = int(train_phases['deg_clip'])
+            else:
+                _deg_clip = 100000      # setting this to a large number so essentially there is no clipping in probability
+            self.size_subg_budget = train_phases['size_subgraph']
+            self.graph_sampler = mrw_sampling(
+                self.adj_train,
+                self.node_train,
+                self.size_subg_budget,
+                train_phases['size_frontier'],
+                _deg_clip,
+            )
+        elif self.method_sample == 'rw':
+            self.size_subg_budget = train_phases['num_root'] * train_phases['depth']
+            self.graph_sampler = rw_sampling(
+                self.adj_train,
+                self.node_train,
+                self.size_subg_budget,
+                int(train_phases['num_root']),
+                int(train_phases['depth']),
+            )
+        elif self.method_sample == 'edge':
+            self.size_subg_budget = train_phases['size_subg_edge'] * 2
+            self.graph_sampler = edge_sampling(
+                self.adj_train,
+                self.node_train,
+                train_phases['size_subg_edge'],
+            )
+        elif self.method_sample == 'node':
+            self.size_subg_budget = train_phases['size_subgraph']
+            self.graph_sampler = node_sampling(
+                self.adj_train,
+                self.node_train,
+                self.size_subg_budget,
+            )
+        elif self.method_sample == 'full_batch':
+            self.size_subg_budget = self.node_train.size
+            self.graph_sampler = full_batch_sampling(
+                self.adj_train,
+                self.node_train,
+                self.size_subg_budget,
+            )
+        elif self.method_sample == "vanilla_node_python":
+            self.size_subg_budget = train_phases["size_subgraph"]
+            self.graph_sampler = NodeSamplingVanillaPython(
+                self.adj_train,
+                self.node_train,
+                self.size_subg_budget,
+            )
+        else:
+            raise NotImplementedError
+
+        self.norm_loss_train = np.zeros(self.adj_train.shape[0])
+        self.norm_aggr_train = np.zeros(self.adj_train.size).astype(np.float32)
+
+        # -------------------------------------------------------------
+        # BELOW: estimation of loss / aggregation normalization factors
+        # -------------------------------------------------------------
+        # For some special sampler, no need to estimate norm factors, we can calculate
+        # the node / edge probabilities directly.
+        # However, for integrity of the framework, we follow the same procedure
+        # for all samplers:
+        #   1. sample enough number of subgraphs
+        #   2. update the counter for each node / edge in the training graph
+        #   3. estimate norm factor alpha and lambda
+        tot_sampled_nodes = 0
+        while True:
+            self.par_graph_sample('train')
+            tot_sampled_nodes = sum([len(n) for n in self.subgraphs_remaining_nodes])
+            if tot_sampled_nodes > self.sample_coverage * self.node_train.size:
+                break
+        print()
+        num_subg = len(self.subgraphs_remaining_nodes)
+        for i in range(num_subg):
+            self.norm_aggr_train[self.subgraphs_remaining_edge_index[i]] += 1
+            self.norm_loss_train[self.subgraphs_remaining_nodes[i]] += 1
+        assert self.norm_loss_train[self.node_val].sum() + self.norm_loss_train[self.node_test].sum() == 0
+        for v in range(self.adj_train.shape[0]):
+            i_s = self.adj_train.indptr[v]
+            i_e = self.adj_train.indptr[v + 1]
+            val = np.clip(self.norm_loss_train[v] / self.norm_aggr_train[i_s : i_e], 0, 1e4)
+            val[np.isnan(val)] = 0.1
+            self.norm_aggr_train[i_s : i_e] = val
+        self.norm_loss_train[np.where(self.norm_loss_train==0)[0]] = 0.1
+        self.norm_loss_train[self.node_val] = 0
+        self.norm_loss_train[self.node_test] = 0
+        self.norm_loss_train[self.node_train] = num_subg / self.norm_loss_train[self.node_train] / self.node_train.size
+        self.norm_loss_train = torch.from_numpy(self.norm_loss_train.astype(np.float32))
+        if self.use_cuda:
+            self.norm_loss_train = self.norm_loss_train.cuda()
+
+    def par_graph_sample(self,phase):
+        """
+        Perform graph sampling in parallel. A wrapper function for graph_samplers.py
+        """
+        t0 = time.time()
+        _indptr, _indices, _data, _v, _edge_index = self.graph_sampler.par_sample(phase)
+        t1 = time.time()
+        print('sampling 200 subgraphs:   time = {:.3f} sec'.format(t1 - t0), end="\r")
+        self.subgraphs_remaining_indptr.extend(_indptr)
+        self.subgraphs_remaining_indices.extend(_indices)
+        self.subgraphs_remaining_data.extend(_data)
+        self.subgraphs_remaining_nodes.extend(_v)
+        self.subgraphs_remaining_edge_index.extend(_edge_index)
+
+    def one_batch(self, mode='train'):
+        """
+        Generate one minibatch for trainer. In the 'train' mode, one minibatch corresponds
+        to one subgraph of the training graph. In the 'val' or 'test' mode, one batch
+        corresponds to the full graph (i.e., full-batch rather than minibatch evaluation
+        for validation / test sets).
+
+        Inputs:
+            mode                str, can be 'train', 'val', 'test' or 'valtest'
+
+        Outputs:
+            node_subgraph       np array, IDs of the subgraph / full graph nodes
+            adj                 scipy CSR, adj matrix of the subgraph / full graph
+            norm_loss           np array, loss normalization coefficients. In 'val' or
+                                'test' modes, we don't need to normalize, and so the values
+                                in this array are all 1.
+        """
+        if mode in ['val','test','valtest']:
+            self.node_subgraph = np.arange(self.adj_full_norm.shape[0])
+            adj = self.adj_full_norm
+        else:
+            assert mode == 'train'
+            if len(self.subgraphs_remaining_nodes) == 0:
+                self.par_graph_sample('train')
+                print()
+
+            self.node_subgraph = self.subgraphs_remaining_nodes.pop()
+            self.size_subgraph = len(self.node_subgraph)
+            adj = sp.csr_matrix(
+                (
+                    self.subgraphs_remaining_data.pop(),
+                    self.subgraphs_remaining_indices.pop(),
+                    self.subgraphs_remaining_indptr.pop()),
+                    shape=(self.size_subgraph,self.size_subgraph,
+                )
+            )
+            adj_edge_index = self.subgraphs_remaining_edge_index.pop()
+            #print("{} nodes, {} edges, {} degree".format(self.node_subgraph.size,adj.size,adj.size/self.node_subgraph.size))
+            norm_aggr(adj.data, adj_edge_index, self.norm_aggr_train, num_proc=args_global.num_cpu_core)
+            # adj.data[:] = self.norm_aggr_train[adj_edge_index][:]      # this line is interchangable with the above line
+            adj = adj_norm(adj, deg=self.deg_train[self.node_subgraph])
+            adj = _coo_scipy2torch(adj.tocoo())
+            if self.use_cuda:
+                adj = adj.cuda()
+            self.batch_num += 1
+        norm_loss = self.norm_loss_test if mode in ['val','test', 'valtest'] else self.norm_loss_train
+        norm_loss = norm_loss[self.node_subgraph]
+        return self.node_subgraph, adj, norm_loss
+
+
+    def num_training_batches(self):
+        return math.ceil(self.node_train.shape[0] / float(self.size_subg_budget))
+
+    def shuffle(self):
+        self.node_train = np.random.permutation(self.node_train)
+        self.batch_num = -1
+
+    def end(self):
+        return (self.batch_num + 1) * self.size_subg_budget >= self.node_train.shape[0]
+
+File Path: graphsaint/pytorch_version/models.py
+Content:
+import torch
+from torch import nn
+import torch.nn.functional as F
+import numpy as np
+from graphsaint.utils import *
+import graphsaint.pytorch_version.layers as layers
+
+
+class GraphSAINT(nn.Module):
+    def __init__(self, num_classes, arch_gcn, train_params, feat_full, label_full, cpu_eval=False):
+        """
+        Build the multi-layer GNN architecture.
+
+        Inputs:
+            num_classes         int, number of classes a node can belong to
+            arch_gcn            dict, config for each GNN layer
+            train_params        dict, training hyperparameters (e.g., learning rate)
+            feat_full           np array of shape N x f, where N is the total num of
+                                nodes and f is the dimension for input node feature
+            label_full          np array, for single-class classification, the shape
+                                is N x 1 and for multi-class classification, the
+                                shape is N x c (where c = num_classes)
+            cpu_eval            bool, if True, will put the model on CPU.
+
+        Outputs:
+            None
+        """
+        super(GraphSAINT,self).__init__()
+        self.use_cuda = (args_global.gpu >= 0)
+        if cpu_eval:
+            self.use_cuda=False
+        if "attention" in arch_gcn:
+            if "gated_attention" in arch_gcn:
+                if arch_gcn['gated_attention']:
+                    self.aggregator_cls = layers.GatedAttentionAggregator
+                    self.mulhead = int(arch_gcn['attention'])
+            else:
+                self.aggregator_cls = layers.AttentionAggregator
+                self.mulhead = int(arch_gcn['attention'])
+        else:
+            self.aggregator_cls = layers.HighOrderAggregator
+            self.mulhead = 1
+        self.num_layers = len(arch_gcn['arch'].split('-'))
+        self.weight_decay = train_params['weight_decay']
+        self.dropout = train_params['dropout']
+        self.lr = train_params['lr']
+        self.arch_gcn = arch_gcn
+        self.sigmoid_loss = (arch_gcn['loss'] == 'sigmoid')
+        self.feat_full = torch.from_numpy(feat_full.astype(np.float32))
+        self.label_full = torch.from_numpy(label_full.astype(np.float32))
+        if self.use_cuda:
+            self.feat_full = self.feat_full.cuda()
+            self.label_full = self.label_full.cuda()
+        if not self.sigmoid_loss:
+            self.label_full_cat = torch.from_numpy(label_full.argmax(axis=1).astype(np.int64))
+            if self.use_cuda:
+                self.label_full_cat = self.label_full_cat.cuda()
+        self.num_classes = num_classes
+        _dims, self.order_layer, self.act_layer, self.bias_layer, self.aggr_layer \
+                        = parse_layer_yml(arch_gcn, self.feat_full.shape[1])
+        # get layer index for each conv layer, useful for jk net last layer aggregation
+        self.set_idx_conv()
+        self.set_dims(_dims)
+
+        self.loss = 0
+        self.opt_op = None
+
+        # build the model below
+        self.num_params = 0
+        self.aggregators, num_param = self.get_aggregators()
+        self.num_params += num_param
+        self.conv_layers = nn.Sequential(*self.aggregators)
+        self.classifier = layers.HighOrderAggregator(self.dims_feat[-1], self.num_classes,\
+                            act='I', order=0, dropout=self.dropout, bias='bias')
+        self.num_params += self.classifier.num_param
+        self.optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
+
+    def set_dims(self, dims):
+        """
+        Set the feature dimension / weight dimension for each GNN or MLP layer.
+        We will use the dimensions set here to initialize PyTorch layers.
+
+        Inputs:
+            dims        list, length of node feature for each hidden layer
+
+        Outputs:
+            None
+        """
+        self.dims_feat = [dims[0]] + [
+            ((self.aggr_layer[l]=='concat') * self.order_layer[l] + 1) * dims[l+1]
+            for l in range(len(dims) - 1)
+        ]
+        self.dims_weight = [(self.dims_feat[l],dims[l+1]) for l in range(len(dims)-1)]
+
+    def set_idx_conv(self):
+        """
+        Set the index of GNN layers for the full neural net. For example, if
+        the full NN is having 1-0-1-0 arch (1-hop graph conv, followed by 0-hop
+        MLP, ...). Then the layer indices will be 0, 2.
+        """
+        idx_conv = np.where(np.array(self.order_layer) >= 1)[0]
+        idx_conv = list(idx_conv[1:] - 1)
+        idx_conv.append(len(self.order_layer) - 1)
+        _o_arr = np.array(self.order_layer)[idx_conv]
+        if np.prod(np.ediff1d(_o_arr)) == 0:
+            self.idx_conv = idx_conv
+        else:
+            self.idx_conv = list(np.where(np.array(self.order_layer) == 1)[0])
+
+
+    def forward(self, node_subgraph, adj_subgraph):
+        feat_subg = self.feat_full[node_subgraph]
+        label_subg = self.label_full[node_subgraph]
+        label_subg_converted = label_subg if self.sigmoid_loss else self.label_full_cat[node_subgraph]
+        _, emb_subg = self.conv_layers((adj_subgraph, feat_subg))
+        emb_subg_norm = F.normalize(emb_subg, p=2, dim=1)
+        pred_subg = self.classifier((None, emb_subg_norm))[1]
+        return pred_subg, label_subg, label_subg_converted
+
+
+    def _loss(self, preds, labels, norm_loss):
+        """
+        The predictor performs sigmoid (for multi-class) or softmax (for single-class)
+        """
+        if self.sigmoid_loss:
+            norm_loss = norm_loss.unsqueeze(1)
+            return torch.nn.BCEWithLogitsLoss(weight=norm_loss,reduction='sum')(preds, labels)
+        else:
+            _ls = torch.nn.CrossEntropyLoss(reduction='none')(preds, labels)
+            return (norm_loss*_ls).sum()
+
+
+    def get_aggregators(self):
+        """
+        Return a list of aggregator instances. to be used in self.build()
+        """
+        num_param = 0
+        aggregators = []
+        for l in range(self.num_layers):
+            aggr = self.aggregator_cls(
+                    *self.dims_weight[l],
+                    dropout=self.dropout,
+                    act=self.act_layer[l],
+                    order=self.order_layer[l],
+                    aggr=self.aggr_layer[l],
+                    bias=self.bias_layer[l],
+                    mulhead=self.mulhead,
+            )
+            num_param += aggr.num_param
+            aggregators.append(aggr)
+        return aggregators, num_param
+
+    def predict(self, preds):
+        return nn.Sigmoid()(preds) if self.sigmoid_loss else F.softmax(preds, dim=1)
+
+
+    def train_step(self, node_subgraph, adj_subgraph, norm_loss_subgraph):
+        """
+        Forward and backward propagation
+        """
+        self.train()
+        self.optimizer.zero_grad()
+        preds, labels, labels_converted = self(node_subgraph, adj_subgraph)
+        loss = self._loss(preds, labels_converted, norm_loss_subgraph) # labels.squeeze()?
+        loss.backward()
+        torch.nn.utils.clip_grad_norm(self.parameters(), 5)
+        self.optimizer.step()
+        return loss, self.predict(preds), labels
+
+    def eval_step(self, node_subgraph, adj_subgraph, norm_loss_subgraph):
+        """
+        Forward propagation only
+        """
+        self.eval()
+        with torch.no_grad():
+            preds,labels,labels_converted = self(node_subgraph, adj_subgraph)
+            loss = self._loss(preds,labels_converted,norm_loss_subgraph)
+        return loss, self.predict(preds), labels
+
+File Path: graphsaint/pytorch_version/train.py
+Content:
+from graphsaint.globals import *
+from graphsaint.pytorch_version.models import GraphSAINT
+from graphsaint.pytorch_version.minibatch import Minibatch
+from graphsaint.utils import *
+from graphsaint.metric import *
+from graphsaint.pytorch_version.utils import *
+
+
+import torch
+import time
+
+
+def evaluate_full_batch(model, minibatch, mode='val'):
+    """
+    Full batch evaluation: for validation and test sets only.
+        When calculating the F1 score, we will mask the relevant root nodes
+        (e.g., those belonging to the val / test sets).
+    """
+    loss,preds,labels = model.eval_step(*minibatch.one_batch(mode=mode))
+    if mode == 'val':
+        node_target = [minibatch.node_val]
+    elif mode == 'test':
+        node_target = [minibatch.node_test]
+    else:
+        assert mode == 'valtest'
+        node_target = [minibatch.node_val, minibatch.node_test]
+    f1mic, f1mac = [], []
+    for n in node_target:
+        f1_scores = calc_f1(to_numpy(labels[n]), to_numpy(preds[n]), model.sigmoid_loss)
+        f1mic.append(f1_scores[0])
+        f1mac.append(f1_scores[1])
+    f1mic = f1mic[0] if len(f1mic)==1 else f1mic
+    f1mac = f1mac[0] if len(f1mac)==1 else f1mac
+    # loss is not very accurate in this case, since loss is also contributed by training nodes
+    # on the other hand, for val / test, we mostly care about their accuracy only.
+    # so the loss issue is not a problem.
+    return loss, f1mic, f1mac
+
+
+
+def prepare(train_data,train_params,arch_gcn):
+    """
+    Prepare some data structure and initialize model / minibatch handler before
+    the actual iterative training taking place.
+    """
+    adj_full, adj_train, feat_full, class_arr,role = train_data
+    adj_full = adj_full.astype(np.int32)
+    adj_train = adj_train.astype(np.int32)
+    adj_full_norm = adj_norm(adj_full)
+    num_classes = class_arr.shape[1]
+
+    minibatch = Minibatch(adj_full_norm, adj_train, role, train_params)
+    model = GraphSAINT(num_classes, arch_gcn, train_params, feat_full, class_arr)
+    printf("TOTAL NUM OF PARAMS = {}".format(sum(p.numel() for p in model.parameters())), style="yellow")
+    minibatch_eval=Minibatch(adj_full_norm, adj_train, role, train_params, cpu_eval=True)
+    model_eval=GraphSAINT(num_classes, arch_gcn, train_params, feat_full, class_arr, cpu_eval=True)
+    if args_global.gpu >= 0:
+        model = model.cuda()
+    return model, minibatch, minibatch_eval, model_eval
+
+
+def train(train_phases, model, minibatch, minibatch_eval, model_eval, eval_val_every):
+    if not args_global.cpu_eval:
+        minibatch_eval=minibatch
+    epoch_ph_start = 0
+    f1mic_best, ep_best = 0, -1
+    time_train = 0
+    dir_saver = '{}/pytorch_models'.format(args_global.dir_log)
+    path_saver = '{}/pytorch_models/saved_model_{}.pkl'.format(args_global.dir_log, timestamp)
+    for ip, phase in enumerate(train_phases):
+        printf('START PHASE {:4d}'.format(ip),style='underline')
+        minibatch.set_sampler(phase)
+        num_batches = minibatch.num_training_batches()
+        for e in range(epoch_ph_start, int(phase['end'])):
+            printf('Epoch {:4d}'.format(e),style='bold')
+            minibatch.shuffle()
+            l_loss_tr, l_f1mic_tr, l_f1mac_tr = [], [], []
+            time_train_ep = 0
+            while not minibatch.end():
+                t1 = time.time()
+                loss_train,preds_train,labels_train = model.train_step(*minibatch.one_batch(mode='train'))
+                time_train_ep += time.time() - t1
+                if not minibatch.batch_num % args_global.eval_train_every:
+                    f1_mic, f1_mac = calc_f1(to_numpy(labels_train),to_numpy(preds_train),model.sigmoid_loss)
+                    l_loss_tr.append(loss_train)
+                    l_f1mic_tr.append(f1_mic)
+                    l_f1mac_tr.append(f1_mac)
+            if (e+1)%eval_val_every == 0:
+                if args_global.cpu_eval:
+                    torch.save(model.state_dict(),'tmp.pkl')
+                    model_eval.load_state_dict(torch.load('tmp.pkl',map_location=lambda storage, loc: storage))
+                else:
+                    model_eval = model
+                loss_val, f1mic_val, f1mac_val = evaluate_full_batch(model_eval, minibatch_eval, mode='val')
+                printf(' TRAIN (Ep avg): loss = {:.4f}\tmic = {:.4f}\tmac = {:.4f}\ttrain time = {:.4f} sec'\
+                        .format(f_mean(l_loss_tr), f_mean(l_f1mic_tr), f_mean(l_f1mac_tr), time_train_ep))
+                printf(' VALIDATION:     loss = {:.4f}\tmic = {:.4f}\tmac = {:.4f}'\
+                        .format(loss_val, f1mic_val, f1mac_val), style='yellow')
+                if f1mic_val > f1mic_best:
+                    f1mic_best, ep_best = f1mic_val, e
+                    if not os.path.exists(dir_saver):
+                        os.makedirs(dir_saver)
+                    printf('  Saving model ...', style='yellow')
+                    torch.save(model.state_dict(), path_saver)
+            time_train += time_train_ep
+        epoch_ph_start = int(phase['end'])
+    printf("Optimization Finished!", style="yellow")
+    if ep_best >= 0:
+        if args_global.cpu_eval:
+            model_eval.load_state_dict(torch.load(path_saver, map_location=lambda storage, loc: storage))
+        else:
+            model.load_state_dict(torch.load(path_saver))
+            model_eval=model
+        printf('  Restoring model ...', style='yellow')
+    loss, f1mic_both, f1mac_both = evaluate_full_batch(model_eval, minibatch_eval, mode='valtest')
+    f1mic_val, f1mic_test = f1mic_both
+    f1mac_val, f1mac_test = f1mac_both
+    printf("Full validation (Epoch {:4d}): \n  F1_Micro = {:.4f}\tF1_Macro = {:.4f}"\
+            .format(ep_best, f1mic_val, f1mac_val), style='red')
+    printf("Full test stats: \n  F1_Micro = {:.4f}\tF1_Macro = {:.4f}"\
+            .format(f1mic_test, f1mac_test), style='red')
+    printf("Total training time: {:6.2f} sec".format(time_train), style='red')
+
+
+if __name__ == '__main__':
+    log_dir(args_global.train_config, args_global.data_prefix, git_branch, git_rev, timestamp)
+    train_params, train_phases, train_data, arch_gcn = parse_n_prepare(args_global)
+    if 'eval_val_every' not in train_params:
+        train_params['eval_val_every'] = EVAL_VAL_EVERY_EP
+    model, minibatch, minibatch_eval, model_eval = prepare(train_data, train_params, arch_gcn)
+    train(train_phases, model, minibatch, minibatch_eval, model_eval, train_params['eval_val_every'])
+
+File Path: graphsaint/pytorch_version/utils.py
+Content:
+import numpy as np
+
+import torch
+from torch.autograd import Variable
+
+def to_numpy(x):
+    if isinstance(x, Variable):
+        x = x.data
+    return x.cpu().numpy() if x.is_cuda else x.numpy()
+
+File Path: graphsaint/setup.py
+Content:
+# cython: language_level=3
+from distutils.core import setup, Extension
+from Cython.Build import cythonize
+import numpy
+# import cython_utils
+
+import os
+os.environ["CC"] = "g++"
+os.environ["CXX"] = "g++"
+
+setup(ext_modules = cythonize(["graphsaint/cython_sampler.pyx","graphsaint/cython_utils.pyx","graphsaint/norm_aggr.pyx"]), include_dirs = [numpy.get_include()])
+# to compile: python graphsaint/setup.py build_ext --inplace
+
+File Path: graphsaint/tensorflow_version/inits.py
+Content:
+import tensorflow as tf
+from graphsaint.globals import *
+import numpy as np
+
+# DISCLAIMER:
+# Parts of this code file are derived from
+# https://github.com/tkipf/gcn
+# which is under an identical MIT license as graphsaint
+
+"""
+Initialization of weight matrices.
+"""
+
+def uniform(shape, scale=0.05, name=None):
+    """Uniform init."""
+    initial = tf.random_uniform(shape, minval=-scale, maxval=scale, dtype=DTYPE)
+    return tf.Variable(initial, name=name)
+
+
+def glorot(shape, name=None):
+    """Glorot & Bengio (AISTATS 2010) init."""
+    init_range = np.sqrt(6.0/(shape[0]+shape[1]))
+    initial = tf.random_uniform(shape, minval=-init_range, maxval=init_range, dtype=DTYPE)
+    return tf.Variable(initial, name=name)
+
+def xavier(shape, name=None):
+    init_dev = np.sqrt(2.0/(shape[0]+shape[1]))
+    initial = tf.random_normal(shape,mean=0,stddev=init_dev,dtype=DTYPE)
+    return tf.Variable(initial, name=name)
+
+
+def zeros(shape, name=None):
+    """All zeros."""
+    initial = tf.zeros(shape, dtype=DTYPE)
+    return tf.Variable(initial, name=name)
+
+def ones(shape, name=None):
+    """All ones."""
+    initial = tf.ones(shape, dtype=DTYPE)
+    return tf.Variable(initial, name=name)
+
+def trained(val_array, name=None):
+    initial = tf.convert_to_tensor(val_array)
+    return tf.Variable(initial, name=name)
+
+File Path: graphsaint/tensorflow_version/layers.py
+Content:
+import tensorflow as tf
+from graphsaint.tensorflow_version.inits import glorot,zeros,trained,ones,xavier,uniform
+from graphsaint.globals import *
+
+F_ACT = {'I': lambda x:x,
+         'relu': tf.nn.relu,
+         'leaky_relu': tf.nn.leaky_relu}
+
+
+# global unique layer ID dictionary for layer name assignment
+_LAYER_UIDS = {}
+
+def get_layer_uid(layer_name=''):
+    """Helper function, assigns unique layer IDs."""
+    if layer_name not in _LAYER_UIDS:
+        _LAYER_UIDS[layer_name] = 1
+        return 1
+    else:
+        _LAYER_UIDS[layer_name] += 1
+        return _LAYER_UIDS[layer_name]
+
+
+class Layer:
+    """Base layer class. Defines basic API for all layer objects.
+    Implementation inspired by keras (http://keras.io).
+    # Properties
+        name: String, defines the variable scope of the layer.
+        logging: Boolean, switches Tensorflow histogram logging on/off
+
+    # Methods
+        _call(inputs): Defines computation graph of layer
+            (i.e. takes input, returns output)
+        __call__(inputs): Wrapper for _call()
+        _log_vars(): Log all variables
+    """
+
+    def __init__(self, **kwargs):
+        allowed_kwargs = {'name', 'logging', 'mulhead'}
+        for kwarg in kwargs.keys():
+            assert kwarg in allowed_kwargs, 'Invalid keyword argument: ' + kwarg
+        name = kwargs.get('name')
+        if not name:
+            layer = self.__class__.__name__.lower()
+            name = layer + '_' + str(get_layer_uid(layer))
+        self.name = name
+        self.vars = {}
+        logging = kwargs.get('logging', False)
+        self.logging = logging
+
+    def _call(self, inputs):
+        return inputs
+
+    def __call__(self, inputs):
+        with tf.name_scope(self.name):
+            if self.logging:
+                if type(inputs)==type([]) or type(inputs)==type((1,2)):
+                    _ip = inputs[0]
+                else:
+                    _ip = inputs
+                tf.summary.histogram(self.name + '/inputs', _ip)
+            outputs = self._call(inputs)
+            if self.logging:
+                tf.summary.histogram(self.name + '/outputs', outputs)
+        return outputs
+
+    def _log_vars(self):
+        for var in self.vars:
+            tf.summary.histogram(self.name + '/vars/' + var, self.vars[var])
+
+
+
+class JumpingKnowledge(Layer):
+    def __init__(self, arch_gcn, dim_input_jk, mode=None, **kwargs):
+        """
+        """
+        super(JumpingKnowledge,self).__init__(**kwargs)
+        self.mode = mode
+        if not mode:
+            return
+        self.act = F_ACT[arch_gcn['act']]
+        self.bias = arch_gcn['bias']
+        self.dim_in = dim_input_jk
+        self.dim_out = arch_gcn['dim']
+
+        with tf.variable_scope(self.name + '_vars'):
+            self.vars['weights'] = glorot([self.dim_in,self.dim_out],name='weights')
+            self.vars['bias'] = zeros([self.dim_out],name='bias')
+            if self.bias == 'norm':
+                self.vars['offset'] = zeros([1,self.dim_out],name='offset')
+                self.vars['scale'] = ones([1,self.dim_out],name='scale')
+        
+
+    def _call(self, inputs):
+        feats_l,idx_conv = inputs
+        if not self.mode:
+            return feats_l[-1]
+        elif self.mode == 'concat':
+            feats_sel = [f for i,f in enumerate(feats_l) if i in idx_conv]
+            feats_aggr = tf.concat(feats_sel, axis=1)
+        elif self.mode == 'max_pool':
+            feats_sel = [f for i,f in enumerate(feats_l) if i in idx_conv]
+            feats_stack = tf.stack(feats_sel)
+            feats_aggr =  tf.reduce_max(feats_stack,axis=0)
+        else:
+            raise NotImplementedError
+        vw = tf.matmul(feats_aggr,self.vars['weights'])
+        vw += self.vars['bias']
+        vw = self.act(vw)
+        if self.bias == 'norm':
+            mean,variance = tf.nn.moments(vw,axes=[1],keep_dims=True)
+            vw = tf.nn.batch_normalization(vw,mean,variance,self.vars['offset'],self.vars['scale'],1e-9)
+        return vw
+
+
+
+
+class HighOrderAggregator(Layer):
+    """
+    If order == 1, then this layer is the normal GCN layer. If order == 0, this layer is equivalent to a dense layer (only self-to-self propagation).
+    If order > 1, then this layer is a high-order layer propagating multi-hop information.
+    """
+    def __init__(self, dim_in, dim_out, dropout=0., act='relu', \
+            order=1, aggr='mean', is_train=True, bias='norm', **kwargs):
+        super(HighOrderAggregator,self).__init__(**kwargs)
+        self.dropout = dropout
+        self.bias = bias
+        self.act = F_ACT[act]
+        self.order = order
+        self.aggr = aggr
+        self.is_train = is_train
+        if dim_out > 0:
+            with tf.variable_scope(self.name + '_vars'):
+                for o in range(self.order+1):
+                    _k = 'order{}_weights'.format(o)
+                    self.vars[_k] = glorot([dim_in,dim_out],name=_k)
+                for o in range(self.order+1):
+                    _k = 'order{}_bias'.format(o)
+                    self.vars[_k] = zeros([dim_out],name=_k)
+                if self.bias == 'norm':
+                    for o in range(self.order+1):
+                        _k1 = 'order{}_offset'.format(o)
+                        _k2 = 'order{}_scale'.format(o)
+                        self.vars[_k1] = zeros([1,dim_out],name=_k1)
+                        self.vars[_k2] = ones([1,dim_out],name=_k2)
+        print('>> layer {}, dim: [{},{}]'.format(self.name, dim_in, dim_out))
+        if self.logging:
+            self._log_vars()
+
+        self.dim_in = dim_in
+        self.dim_out = dim_out
+
+
+    def _F_nonlinear(self,vecs,order):
+        vw = tf.matmul(vecs,self.vars['order{}_weights'.format(order)])
+        vw += self.vars['order{}_bias'.format(order)]
+        vw = self.act(vw)
+        if self.bias == 'norm':   # batch norm realized by tf.nn.batch_norm (consistent with SGCN implementation)
+            mean,variance = tf.nn.moments(vw,axes=[1],keep_dims=True)
+            _off = 'order{}_offset'.format(order)
+            _sca = 'order{}_scale'.format(order)
+            vw = tf.nn.batch_normalization(vw,mean,variance,self.vars[_off],self.vars[_sca],1e-9)
+        return vw
+
+    def _call(self, inputs):
+        # vecs: input feature of the current layer. 
+        # adj_partition_list: the row partitions of the full graph adj 
+        #       (only used in full-batch evaluation on the val/test sets)
+        vecs, adj_norm, len_feat, adj_partition_list, _ = inputs
+        vecs = tf.nn.dropout(vecs, 1-self.dropout)
+        vecs_hop = [tf.identity(vecs) for o in range(self.order+1)]
+        for o in range(self.order):
+            for a in range(o+1):
+                ans1 = tf.sparse_tensor_dense_matmul(adj_norm,vecs_hop[o+1])
+                ans_partition = [tf.sparse_tensor_dense_matmul(adj,vecs_hop[o+1]) for adj in adj_partition_list]
+                ans2 = tf.concat(ans_partition,0)
+                vecs_hop[o+1]=tf.cond(self.is_train,lambda: tf.identity(ans1),lambda: tf.identity(ans2))
+        vecs_hop = [self._F_nonlinear(v,o) for o,v in enumerate(vecs_hop)]    
+        if self.aggr == 'mean':
+            ret = vecs_hop[0]
+            for o in range(len(vecs_hop)-1):
+                ret += vecs_hop[o+1]
+        elif self.aggr == 'concat':
+            ret = tf.concat(vecs_hop,axis=1)
+        else:
+            raise NotImplementedError
+        return ret
+
+
+class AttentionAggregator(Layer):
+    """
+    Attention mechanism by GAT. We remove the softmax step since during minibatch training, we cannot see all neighbors of a node.
+    """
+    def __init__(self, dim_in, dim_out,
+            dropout=0., act='relu', order=1, aggr='mean', is_train=True, bias='norm', **kwargs):
+        assert order <= 1, "now only support attention for order 0/1 layers"
+        super(AttentionAggregator,self).__init__(**kwargs)
+        self.dropout = dropout
+        self.bias = bias
+        self.act = F_ACT[act]
+        self.order = order
+        self.aggr = aggr
+        self.is_train = is_train
+        if 'mulhead' in kwargs.keys():
+            self.mulhead = int(kwargs['mulhead'])
+        else:
+            self.mulhead = 1
+        with tf.variable_scope(self.name + '_vars'):
+            self.vars['order0_weights'] = glorot([dim_in,dim_out],name='order0_weights')
+            for k in range(self.mulhead):
+                self.vars['order1_weights_h{}'.format(k)] = glorot([dim_in,int(dim_out/self.mulhead)],name='order1_weights_h{}'.format(k))
+            self.vars['order0_bias'] = zeros([dim_out],name='order0_bias')
+            for k in range(self.mulhead):
+                self.vars['order1_bias_h{}'.format(k)] = zeros([int(dim_out/self.mulhead)],name='order1_bias_h{}'.format(k))
+
+            if self.bias == 'norm':
+                for o in range(self.order+1):
+                    _k1 = 'order{}_offset'.format(o)
+                    _k2 = 'order{}_scale'.format(o)
+                    self.vars[_k1] = zeros([1,dim_out],name=_k1)
+                    self.vars[_k2] = ones([1,dim_out],name=_k2)
+            for k in range(self.mulhead):
+                self.vars['attention_0_h{}'.format(k)] = glorot([1,int(dim_out/self.mulhead)],name='attention_0_h{}'.format(k))
+                self.vars['attention_1_h{}'.format(k)] = glorot([1,int(dim_out/self.mulhead)],name='attention_1_h{}'.format(k))
+                self.vars['att_bias_0_h{}'.format(k)] = zeros([1],name='att_bias_0_h{}'.format(k))
+                self.vars['att_bias_1_h{}'.format(k)] = zeros([1],name='att_bias_1_h{}'.format(k))
+        print('>> layer {}, dim: [{},{}]'.format(self.name, dim_in, dim_out))
+        if self.logging:
+            self._log_vars()
+
+        self.dim_in = dim_in
+        self.dim_out = dim_out
+
+    def _F_edge_weight(self,adj_part,vecs_neigh,vecs_self,offset=0):
+        adj_mask = tf.dtypes.cast(tf.dtypes.cast(adj_part, tf.bool), tf.float32)
+        a1 = tf.SparseTensor(adj_mask.indices,tf.nn.embedding_lookup(vecs_neigh,adj_mask.indices[:,1]),adj_mask.dense_shape)
+        a2 = tf.SparseTensor(adj_mask.indices,tf.nn.embedding_lookup(vecs_self,adj_mask.indices[:,0]+offset),adj_mask.dense_shape)
+        alpha = tf.SparseTensor(adj_mask.indices,tf.nn.relu(a1.values+a2.values),adj_mask.dense_shape)
+        adj_weighted = tf.SparseTensor(adj_mask.indices,adj_part.values*alpha.values,adj_mask.dense_shape)
+        return adj_weighted
+
+
+    def _call(self, inputs):
+    
+        vecs, adj_norm, len_feat, adj_partition_list, dim0_adj_sub = inputs
+        adj_norm = tf.cond(self.is_train,lambda: adj_norm,lambda: tf.sparse.concat(0,adj_partition_list))
+        vecs_do1 = tf.nn.dropout(vecs, 1-self.dropout)
+        vecs_do2 = tf.nn.dropout(vecs, 1-self.dropout)
+        vw_self = tf.matmul(vecs_do2,self.vars['order0_weights'])
+        ret_self = self.act(vw_self + self.vars['order0_bias'])
+        if self.bias == 'norm':
+            mean,variance = tf.nn.moments(ret_self,axes=[1],keep_dims=True)
+            ret_self = tf.nn.batch_normalization(ret_self,mean,variance,self.vars['order0_offset'],self.vars['order0_scale'],1e-9)
+        if self.order == 0:
+            return ret_self
+        
+        # the aggr below only applies to order 1 layers
+
+        ret_neigh_l_subg = list()
+        ret_neigh_l_fullg = list()
+        offset = 0
+        vw_neigh = list()
+        vw_neigh_att = list()
+        vw_self_att = list()
+        for i in range(self.mulhead):
+            vw_neigh.append(tf.matmul(vecs_do1,self.vars['order1_weights_h{}'.format(i)]))
+            vw_neigh_att.append(tf.reduce_sum(vw_neigh[i]*self.vars['attention_1_h{}'.format(i)],axis=-1)\
+                            + self.vars['att_bias_1_h{}'.format(i)])
+            vw_self_att.append(tf.reduce_sum(vw_neigh[i]*self.vars['attention_0_h{}'.format(i)],axis=-1)\
+                            + self.vars['att_bias_0_h{}'.format(i)])
+        
+        for i in range(self.mulhead):
+            adj_weighted = self._F_edge_weight(adj_norm,vw_neigh_att[i],vw_self_att[i],offset=0)
+            ret_neigh_i = self.act(tf.sparse_tensor_dense_matmul(adj_weighted,vw_neigh[i])) \
+                            + self.vars['order1_bias_h{}'.format(i)]
+            ret_neigh_l_subg.append(ret_neigh_i)
+
+    
+        for _adj in adj_partition_list:
+            ret_neigh_la = list()
+            for i in range(self.mulhead):
+                adj_weighted = self._F_edge_weight(_adj,vw_neigh_att[i],vw_self_att[i],offset=offset)
+                ret_neigh_i = self.act(tf.sparse_tensor_dense_matmul(adj_weighted,vw_neigh[i]) \
+                                + self.vars['order1_bias_h{}'.format(i)])
+                ret_neigh_la.append(ret_neigh_i)
+            ret_neigh_l_fullg.append(tf.concat(ret_neigh_la,axis=1))
+            offset += dim0_adj_sub
+        ret_neigh = tf.cond(self.is_train, lambda: tf.concat(ret_neigh_l_subg,axis=1), lambda: tf.concat(ret_neigh_l_fullg,axis=0))
+        if self.bias == 'norm':
+            mean,variance = tf.nn.moments(ret_neigh,axes=[1],keep_dims=True)
+            ret_neigh = tf.nn.batch_normalization(ret_neigh,mean,variance,self.vars['order1_offset'],self.vars['order1_scale'],1e-9)
+        if self.aggr == 'mean':
+            ret = ret_neigh + ret_self
+        elif self.aggr == 'concat':
+            ret = tf.concat([ret_self,ret_neigh],axis=1)
+        else:
+            raise NotImplementedError
+        return ret
+
+
+File Path: graphsaint/tensorflow_version/minibatch.py
+Content:
+from graphsaint.globals import *
+import math
+from graphsaint.tensorflow_version.inits import *
+from graphsaint.utils import *
+from graphsaint.graph_samplers import *
+from graphsaint.norm_aggr import *
+import tensorflow as tf
+import scipy.sparse as sp
+import scipy
+
+import numpy as np
+import time
+
+import pdb
+
+
+
+
+class Minibatch:
+    """
+    This minibatch iterator iterates over nodes for supervised learning.
+    """
+
+    def __init__(self, adj_full_norm, adj_train, role, class_arr, placeholders, train_params, **kwargs):
+        """
+        role:       array of string (length |V|)
+                    storing role of the node ('tr'/'va'/'te')
+        class_arr: array of float (shape |V|xf)
+                    storing initial feature vectors
+        """
+        self.node_train = np.array(role['tr'])
+        self.node_val = np.array(role['va'])
+        self.node_test = np.array(role['te'])
+
+        self.class_arr = class_arr
+        self.adj_full_norm = adj_full_norm
+        s1=int(adj_full_norm.shape[0]/8*1)
+        s2=int(adj_full_norm.shape[0]/8*2)
+        s3=int(adj_full_norm.shape[0]/8*3)
+        s4=int(adj_full_norm.shape[0]/8*4)
+        s5=int(adj_full_norm.shape[0]/8*5)
+        s6=int(adj_full_norm.shape[0]/8*6)
+        s7=int(adj_full_norm.shape[0]/8*7)
+        self.dim0_adj_sub = adj_full_norm.shape[0]/8
+        self.adj_full_norm_0=adj_full_norm[:s1,:]
+        self.adj_full_norm_1=adj_full_norm[s1:s2,:]
+        self.adj_full_norm_2=adj_full_norm[s2:s3,:]
+        self.adj_full_norm_3=adj_full_norm[s3:s4,:]
+        self.adj_full_norm_4=adj_full_norm[s4:s5,:]
+        self.adj_full_norm_5=adj_full_norm[s5:s6,:]
+        self.adj_full_norm_6=adj_full_norm[s6:s7,:]
+        self.adj_full_norm_7=adj_full_norm[s7:,:]
+        self.adj_train = adj_train
+
+        assert self.class_arr.shape[0] == self.adj_full_norm.shape[0]
+
+        # below: book-keeping for mini-batch
+        self.placeholders = placeholders
+        self.node_subgraph = None
+        self.batch_num = -1
+
+        self.method_sample = None
+        self.subgraphs_remaining_indptr = []
+        self.subgraphs_remaining_indices = []
+        self.subgraphs_remaining_data = []
+        self.subgraphs_remaining_nodes = []
+        self.subgraphs_remaining_edge_index = []
+        
+        self.norm_loss_train = np.zeros(self.adj_train.shape[0])
+        # norm_loss_test is used in full batch evaluation (without sampling). so neighbor features are simply averaged.
+        self.norm_loss_test = np.zeros(self.adj_full_norm.shape[0])
+        _denom = len(self.node_train) + len(self.node_val) +  len(self.node_test)
+        self.norm_loss_test[self.node_train] = 1./_denom
+        self.norm_loss_test[self.node_val] = 1./_denom
+        self.norm_loss_test[self.node_test] = 1./_denom
+        self.norm_aggr_train = np.zeros(self.adj_train.size)
+       
+        self.sample_coverage = train_params['sample_coverage']
+        self.dropout = train_params['dropout']
+        self.deg_train = np.array(self.adj_train.sum(1)).flatten()
+
+
+    def set_sampler(self,train_phases):
+        self.subgraphs_remaining_indptr = list()
+        self.subgraphs_remaining_indices = list()
+        self.subgraphs_remaining_data = list()
+        self.subgraphs_remaining_nodes = list()
+        self.subgraphs_remaining_edge_index = list()
+        self.method_sample = train_phases['sampler']
+        if self.method_sample == 'mrw':
+            if 'deg_clip' in train_phases:
+                _deg_clip = int(train_phases['deg_clip'])
+            else:
+                _deg_clip = 100000      # setting this to a large number so essentially there is no clipping in probability
+            self.size_subg_budget = train_phases['size_subgraph']
+            self.graph_sampler = mrw_sampling(self.adj_train,\
+                self.node_train,self.size_subg_budget,train_phases['size_frontier'],_deg_clip)
+        elif self.method_sample == 'rw':
+            self.size_subg_budget = train_phases['num_root']*train_phases['depth']
+            self.graph_sampler = rw_sampling(self.adj_train,\
+                self.node_train,self.size_subg_budget,int(train_phases['num_root']),int(train_phases['depth']))
+        elif self.method_sample == 'edge':
+            self.size_subg_budget = train_phases['size_subg_edge']*2
+            self.graph_sampler = edge_sampling(self.adj_train,self.node_train,train_phases['size_subg_edge'])
+        elif self.method_sample == 'node':
+            self.size_subg_budget = train_phases['size_subgraph']
+            self.graph_sampler = node_sampling(self.adj_train,self.node_train,self.size_subg_budget)
+        elif self.method_sample == 'full_batch':
+            self.size_subg_budget = self.node_train.size
+            self.graph_sampler = full_batch_sampling(self.adj_train,self.node_train,self.size_subg_budget)
+        else:
+            raise NotImplementedError
+
+        self.norm_loss_train = np.zeros(self.adj_train.shape[0])
+        self.norm_aggr_train = np.zeros(self.adj_train.size).astype(np.float32)
+
+        # For edge sampler, no need to estimate norm factors, we can calculate directly.
+        # However, for integrity of the framework, we decide to follow the same procedure for all samplers: 
+        # 1. sample enough number of subgraphs
+        # 2. estimate norm factor alpha and lambda
+        tot_sampled_nodes = 0
+        while True:
+            self.par_graph_sample('train')
+            tot_sampled_nodes = sum([len(n) for n in self.subgraphs_remaining_nodes])
+            if tot_sampled_nodes > self.sample_coverage*self.node_train.size:
+                break
+        print()
+        num_subg = len(self.subgraphs_remaining_nodes)
+        for i in range(num_subg):
+            self.norm_aggr_train[self.subgraphs_remaining_edge_index[i]] += 1
+            self.norm_loss_train[self.subgraphs_remaining_nodes[i]] += 1
+        assert self.norm_loss_train[self.node_val].sum() + self.norm_loss_train[self.node_test].sum() == 0
+        for v in range(self.adj_train.shape[0]):
+            i_s = self.adj_train.indptr[v]
+            i_e = self.adj_train.indptr[v+1]
+            val = np.clip(self.norm_loss_train[v]/self.norm_aggr_train[i_s:i_e], 0, 1e4)
+            val[np.isnan(val)] = 0.1
+            self.norm_aggr_train[i_s:i_e] = val
+        self.norm_loss_train[np.where(self.norm_loss_train==0)[0]] = 0.1
+        self.norm_loss_train[self.node_val] = 0
+        self.norm_loss_train[self.node_test] = 0
+        self.norm_loss_train[self.node_train] = num_subg/self.norm_loss_train[self.node_train]/self.node_train.size
+
+    def par_graph_sample(self,phase):
+        t0 = time.time()
+        _indptr,_indices,_data,_v,_edge_index= self.graph_sampler.par_sample(phase)
+        t1 = time.time()
+        print('sampling 200 subgraphs:   time = {:.3f} sec'.format(t1-t0), end="\r")
+        self.subgraphs_remaining_indptr.extend(_indptr)
+        self.subgraphs_remaining_indices.extend(_indices)
+        self.subgraphs_remaining_data.extend(_data)
+        self.subgraphs_remaining_nodes.extend(_v)
+        self.subgraphs_remaining_edge_index.extend(_edge_index)
+
+    def feed_dict(self,mode='train'):
+        """ DONE """
+        if mode in ['val','test']:
+            self.node_subgraph = np.arange(self.class_arr.shape[0])
+            adj = sp.csr_matrix(([],[],np.zeros(2)), shape=(1,self.node_subgraph.shape[0]))
+            #adj = self.adj_full_norm
+            adj_0 = self.adj_full_norm_0
+            adj_1 = self.adj_full_norm_1
+            adj_2 = self.adj_full_norm_2
+            adj_3 = self.adj_full_norm_3
+            adj_4 = self.adj_full_norm_4
+            adj_5 = self.adj_full_norm_5
+            adj_6 = self.adj_full_norm_6
+            adj_7 = self.adj_full_norm_7
+            _dropout = 0.
+        else:
+            assert mode == 'train'
+            tt0=time.time()
+            if len(self.subgraphs_remaining_nodes) == 0:
+                self.par_graph_sample('train')
+                print()
+
+            self.node_subgraph = self.subgraphs_remaining_nodes.pop()
+            self.size_subgraph = len(self.node_subgraph)
+            adj = sp.csr_matrix((self.subgraphs_remaining_data.pop(),self.subgraphs_remaining_indices.pop(),\
+                        self.subgraphs_remaining_indptr.pop()),shape=(self.node_subgraph.size,self.node_subgraph.size))
+            adj_edge_index=self.subgraphs_remaining_edge_index.pop()
+            #print("{} nodes, {} edges, {} degree".format(self.node_subgraph.size,adj.size,adj.size/self.node_subgraph.size))
+            tt1 = time.time()
+            assert len(self.node_subgraph) == adj.shape[0]
+            norm_aggr(adj.data,adj_edge_index,self.norm_aggr_train,num_proc=args_global.num_cpu_core)
+
+            tt2 = time.time()
+            adj = adj_norm(adj, deg=self.deg_train[self.node_subgraph])
+
+            adj_0 = sp.csr_matrix(([],[],np.zeros(2)),shape=(1,self.node_subgraph.shape[0]))
+            adj_1 = sp.csr_matrix(([],[],np.zeros(2)),shape=(1,self.node_subgraph.shape[0]))
+            adj_2 = sp.csr_matrix(([],[],np.zeros(2)),shape=(1,self.node_subgraph.shape[0]))
+            adj_3 = sp.csr_matrix(([],[],np.zeros(2)),shape=(1,self.node_subgraph.shape[0]))
+            adj_4 = sp.csr_matrix(([],[],np.zeros(2)),shape=(1,self.node_subgraph.shape[0]))
+            adj_5 = sp.csr_matrix(([],[],np.zeros(2)),shape=(1,self.node_subgraph.shape[0]))
+            adj_6 = sp.csr_matrix(([],[],np.zeros(2)),shape=(1,self.node_subgraph.shape[0]))
+            adj_7 = sp.csr_matrix(([],[],np.zeros(2)),shape=(1,self.node_subgraph.shape[0]))
+
+            _dropout = self.dropout
+
+            self.batch_num += 1
+        feed_dict = dict()
+        feed_dict.update({self.placeholders['node_subgraph']: self.node_subgraph})
+        feed_dict.update({self.placeholders['labels']: self.class_arr[self.node_subgraph]})
+        feed_dict.update({self.placeholders['dropout']: _dropout})
+        if mode in ['val','test']:
+            feed_dict.update({self.placeholders['norm_loss']: self.norm_loss_test})
+        else:
+            feed_dict.update({self.placeholders['norm_loss']: self.norm_loss_train})
+        
+        _num_edges = len(adj.nonzero()[1])
+        _num_vertices = len(self.node_subgraph)
+        _indices_ph = np.column_stack(adj.nonzero())
+        _shape_ph = adj.shape
+        feed_dict.update({self.placeholders['adj_subgraph']: \
+            tf.SparseTensorValue(_indices_ph,adj.data,_shape_ph)})
+        feed_dict.update({self.placeholders['adj_subgraph_0']: \
+            tf.SparseTensorValue(np.column_stack(adj_0.nonzero()),adj_0.data,adj_0.shape)})
+        feed_dict.update({self.placeholders['adj_subgraph_1']: \
+            tf.SparseTensorValue(np.column_stack(adj_1.nonzero()),adj_1.data,adj_1.shape)})
+        feed_dict.update({self.placeholders['adj_subgraph_2']: \
+            tf.SparseTensorValue(np.column_stack(adj_2.nonzero()),adj_2.data,adj_2.shape)})
+        feed_dict.update({self.placeholders['adj_subgraph_3']: \
+            tf.SparseTensorValue(np.column_stack(adj_3.nonzero()),adj_3.data,adj_3.shape)})
+        feed_dict.update({self.placeholders['adj_subgraph_4']: \
+            tf.SparseTensorValue(np.column_stack(adj_4.nonzero()),adj_4.data,adj_4.shape)})
+        feed_dict.update({self.placeholders['adj_subgraph_5']: \
+            tf.SparseTensorValue(np.column_stack(adj_5.nonzero()),adj_5.data,adj_5.shape)})
+        feed_dict.update({self.placeholders['adj_subgraph_6']: \
+            tf.SparseTensorValue(np.column_stack(adj_6.nonzero()),adj_6.data,adj_6.shape)})
+        feed_dict.update({self.placeholders['adj_subgraph_7']: \
+            tf.SparseTensorValue(np.column_stack(adj_7.nonzero()),adj_7.data,adj_7.shape)})
+        feed_dict.update({self.placeholders['dim0_adj_sub']:\
+            self.dim0_adj_sub})
+        tt3=time.time()
+        # if mode in ['train']:
+        #     print("t1:{:.3f} t2:{:.3f} t3:{:.3f}".format(tt0-tt1,tt2-tt1,tt3-tt2))
+        if mode in ['val','test']:
+            feed_dict[self.placeholders['is_train']]=False
+        else:
+            feed_dict[self.placeholders['is_train']]=True
+        return feed_dict, self.class_arr[self.node_subgraph]
+
+
+    def num_training_batches(self):
+        """ DONE """
+        return math.ceil(self.node_train.shape[0]/float(self.size_subg_budget))
+
+    def shuffle(self):
+        """ DONE """
+        self.node_train = np.random.permutation(self.node_train)
+        self.batch_num = -1
+
+    def end(self):
+        """ DONE """
+        return (self.batch_num+1)*self.size_subg_budget >= self.node_train.shape[0]
+
+File Path: graphsaint/tensorflow_version/model.py
+Content:
+import tensorflow as tf
+from graphsaint.globals import *
+from graphsaint.tensorflow_version.inits import *
+import graphsaint.tensorflow_version.layers as layers
+from graphsaint.utils import *
+import pdb
+
+
+class GraphSAINT:
+
+    def __init__(self, num_classes, placeholders, features,
+            arch_gcn, train_params, adj_full_norm, **kwargs):
+        '''
+        Args:
+            - placeholders: TensorFlow placeholder object.
+            - features: Numpy array with node features.
+            - adj: Numpy array with adjacency lists (padded with random re-samples)
+            - degrees: Numpy array with node degrees.
+            - sigmoid_loss: Set to true if nodes can belong to multiple classes
+        '''
+        if "attention" in arch_gcn:
+            self.aggregator_cls = layers.AttentionAggregator
+            self.mulhead = int(arch_gcn['attention'])
+        else:
+            self.aggregator_cls = layers.HighOrderAggregator
+            self.mulhead = 1
+        self.lr = train_params['lr']
+        self.node_subgraph = placeholders['node_subgraph']
+        self.num_layers = len(arch_gcn['arch'].split('-'))
+        self.weight_decay = train_params['weight_decay']
+        self.jk = None if 'jk' not in arch_gcn else arch_gcn['jk']
+        self.arch_gcn = arch_gcn
+        self.adj_subgraph = placeholders['adj_subgraph']
+        # adj_subgraph_* are to store row-wise partitioned full graph adj tiles. 
+        self.adj_subgraph_0=placeholders['adj_subgraph_0']
+        self.adj_subgraph_1=placeholders['adj_subgraph_1']
+        self.adj_subgraph_2=placeholders['adj_subgraph_2']
+        self.adj_subgraph_3=placeholders['adj_subgraph_3']
+        self.adj_subgraph_4=placeholders['adj_subgraph_4']
+        self.adj_subgraph_5=placeholders['adj_subgraph_5']
+        self.adj_subgraph_6=placeholders['adj_subgraph_6']
+        self.adj_subgraph_7=placeholders['adj_subgraph_7']
+        self.dim0_adj_sub = placeholders['dim0_adj_sub'] #adj_full_norm.shape[0]/8
+        self.features = tf.Variable(tf.constant(features, dtype=DTYPE), trainable=False)
+        self.dualGPU=args_global.dualGPU
+        _indices = np.column_stack(adj_full_norm.nonzero())
+        _data = adj_full_norm.data
+        _shape = adj_full_norm.shape
+        with tf.device('/cpu:0'):
+            self.adj_full_norm = tf.SparseTensorValue(_indices,_data,_shape)
+        self.num_classes = num_classes
+        self.sigmoid_loss = (arch_gcn['loss']=='sigmoid')
+        _dims,self.order_layer,self.act_layer,self.bias_layer,self.aggr_layer = parse_layer_yml(arch_gcn,features.shape[1])
+        # get layer index for each conv layer, useful for jk net last layer aggregation
+        self.set_idx_conv()
+        self.set_dims(_dims)
+        self.placeholders = placeholders
+
+        self.optimizer = tf.train.AdamOptimizer(learning_rate=self.lr)
+
+        self.loss = 0
+        self.opt_op = None
+        self.norm_loss = placeholders['norm_loss']
+        self.is_train = placeholders['is_train']
+        
+        self.build()
+
+    def set_dims(self,dims):
+        self.dims_feat = [dims[0]] + [((self.aggr_layer[l]=='concat')*self.order_layer[l]+1)*dims[l+1] for l in range(len(dims)-1)]
+        self.dims_weight = [(self.dims_feat[l],dims[l+1]) for l in range(len(dims)-1)]
+
+    def set_idx_conv(self):
+        idx_conv = np.where(np.array(self.order_layer)>=1)[0]
+        idx_conv = list(idx_conv[1:] - 1)
+        idx_conv.append(len(self.order_layer)-1)
+        _o_arr = np.array(self.order_layer)[idx_conv]
+        if np.prod(np.ediff1d(_o_arr)) == 0:
+            self.idx_conv = idx_conv
+        else:
+            self.idx_conv = list(np.where(np.array(self.order_layer)==1)[0])
+
+
+    def build(self):
+        """
+        Build the sample graph with adj info in self.sample()
+        directly feed the sampled support vectors to tf placeholder
+        """
+        self.aggregators = self.get_aggregators()
+        _outputs_l = self.aggregate_subgraph()
+        if self.jk == 'concat':
+            _dim_input_jk = np.array(self.dims_feat)[np.array(self.idx_conv)+1].sum()
+        else:
+            _dim_input_jk = self.dims_feat[-1]
+        self.layer_jk = layers.JumpingKnowledge(self.arch_gcn,_dim_input_jk,mode=self.jk)
+        self.outputs = self.layer_jk([_outputs_l, self.idx_conv])
+        # OUPTUT LAYER
+        self.outputs = tf.nn.l2_normalize(self.outputs, 1)
+        _dim_final = self.arch_gcn['dim'] if self.jk else self.dims_feat[-1]
+        self.layer_pred = layers.HighOrderAggregator(_dim_final,self.num_classes,act="I",\
+                    order=0,dropout=self.placeholders["dropout"],bias="bias")
+        self.node_preds = self.layer_pred((self.outputs,None,None,None,None))
+
+        # BACK PROP
+        self._loss()
+        update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+        with tf.control_dependencies(update_ops):
+            grads_and_vars = self.optimizer.compute_gradients(self.loss)
+            clipped_grads_and_vars = [(tf.clip_by_value(grad, -5.0, 5.0) if grad is not None else None, var)
+                    for grad, var in grads_and_vars]
+            self.grad, _ = clipped_grads_and_vars[0]
+            self.opt_op = self.optimizer.apply_gradients(clipped_grads_and_vars)
+        self.preds = self.predict()
+
+
+    def _loss(self):
+        # these are all the trainable var
+        for aggregator in self.aggregators:
+            for var in aggregator.vars.values():
+                self.loss += self.weight_decay * tf.nn.l2_loss(var)
+        for var in self.layer_pred.vars.values():
+            self.loss += self.weight_decay * tf.nn.l2_loss(var)
+
+        # classification loss
+        f_loss = tf.nn.sigmoid_cross_entropy_with_logits if self.sigmoid_loss\
+                                else tf.nn.softmax_cross_entropy_with_logits
+        # weighted loss due to bias in appearance of vertices
+        self.loss_terms = f_loss(logits=self.node_preds, labels=self.placeholders['labels'])
+        loss_terms_ndims = self.loss_terms.shape.ndims if self.loss_terms.shape is not None else None
+        if loss_terms_ndims == 1:
+            self.loss_terms = tf.reshape(self.loss_terms,(-1,1))
+        self._weight_loss_batch = tf.nn.embedding_lookup(self.norm_loss, self.node_subgraph)
+        _loss_terms_weight = tf.linalg.matmul(tf.transpose(self.loss_terms),\
+                    tf.reshape(self._weight_loss_batch,(-1,1)))
+        self.loss += tf.reduce_sum(_loss_terms_weight)
+        tf.summary.scalar('loss', self.loss)
+
+    def predict(self):
+        return tf.nn.sigmoid(self.node_preds) if self.sigmoid_loss \
+                else tf.nn.softmax(self.node_preds)
+
+
+    def get_aggregators(self,name=None):
+        aggregators = []
+        for layer in range(self.num_layers):
+            aggregator = self.aggregator_cls(self.dims_weight[layer][0], self.dims_weight[layer][1],
+                    dropout=self.placeholders['dropout'],name=name,
+                    act=self.act_layer[layer],order=self.order_layer[layer],aggr=self.aggr_layer[layer],\
+                    is_train=self.is_train,bias=self.bias_layer[layer],\
+                    mulhead=self.mulhead)
+            aggregators.append(aggregator)
+        return aggregators
+
+
+    def aggregate_subgraph(self, batch_size=None, name=None, mode='train'):
+        if mode == 'train':
+            hidden = tf.nn.embedding_lookup(self.features, self.node_subgraph)
+            adj = self.adj_subgraph
+        else:
+            hidden = self.features
+            adj = self.adj_full_norm
+        ret_l = list()
+        _adj_partition_list = [self.adj_subgraph_0,self.adj_subgraph_1,self.adj_subgraph_2,self.adj_subgraph_3,
+                      self.adj_subgraph_4,self.adj_subgraph_5,self.adj_subgraph_6,self.adj_subgraph_7]
+        if not args_global.dualGPU:
+            for layer in range(self.num_layers):
+                hidden = self.aggregators[layer]((hidden,adj,self.dims_feat[layer],_adj_partition_list,self.dim0_adj_sub))
+                ret_l.append(hidden)
+        else:
+            split=int(self.num_layers/2)
+            with tf.device('/gpu:0'):
+                for layer in range(split):
+                    hidden = self.aggregators[layer]((hidden,adj,self.dims_feat[layer],_adj_partition_list,self.dim0_adj_sub))
+                    ret_l.append(hidden)
+            with tf.device('/gpu:1'):
+                for layer in range(split,self.num_layers):
+                    hidden = self.aggregators[layer]((hidden,adj,self.dims_feat[layer],_adj_partition_list,self.dim0_adj_sub))
+                    ret_l.append(hidden)
+        return ret_l
+
+
+File Path: graphsaint/tensorflow_version/train.py
+Content:
+from graphsaint.globals import *
+from graphsaint.tensorflow_version.inits import *
+from graphsaint.tensorflow_version.model import GraphSAINT
+from graphsaint.tensorflow_version.minibatch import Minibatch
+from graphsaint.utils import *
+from graphsaint.metric import *
+from tensorflow.python.client import timeline
+
+import sys, os, random
+import tensorflow as tf
+import numpy as np
+import time
+import pdb
+import json
+
+class TimeLiner:
+    _timeline_dict = None
+
+    def update_timeline(self, chrome_trace):
+        # convert crome trace to python dict
+        chrome_trace_dict = json.loads(chrome_trace)
+        # for first run store full trace
+        if self._timeline_dict is None:
+            self._timeline_dict = chrome_trace_dict
+        # for other - update only time consumption, not definitions
+        else:
+            for event in chrome_trace_dict['traceEvents']:
+                # events time consumption started with 'ts' prefix
+                if 'ts' in event:
+                    self._timeline_dict['traceEvents'].append(event)
+
+    def save(self, f_name):
+        with open(f_name, 'w') as f:
+            json.dump(self._timeline_dict, f)
+
+def evaluate_full_batch(sess,model,minibatch_iter,many_runs_timeline,mode):
+    """
+    Full batch evaluation
+    NOTE: HERE GCN RUNS THROUGH THE FULL GRAPH. HOWEVER, WE CALCULATE F1 SCORE
+        FOR VALIDATION / TEST NODES ONLY. 
+    """
+    options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
+    run_metadata = tf.RunMetadata()
+    t1 = time.time()
+    num_cls = minibatch_iter.class_arr.shape[-1]
+    feed_dict, labels = minibatch_iter.feed_dict(mode)
+    if args_global.timeline:
+        preds,loss = sess.run([model.preds, model.loss], feed_dict=feed_dict, options=options, run_metadata=run_metadata)
+        fetched_timeline = timeline.Timeline(run_metadata.step_stats)
+        chrome_trace = fetched_timeline.generate_chrome_trace_format()
+        many_runs_timeline.append(chrome_trace)
+    else:
+        preds,loss = sess.run([model.preds, model.loss], feed_dict=feed_dict)
+    node_val_test = minibatch_iter.node_val if mode=='val' else minibatch_iter.node_test
+    t2 = time.time()
+    f1_scores = calc_f1(labels[node_val_test],preds[node_val_test],model.sigmoid_loss)
+    return loss, f1_scores[0], f1_scores[1], (t2-t1)
+
+
+
+def construct_placeholders(num_classes):
+    placeholders = {
+        'labels': tf.placeholder(DTYPE, shape=(None, num_classes), name='labels'),
+        'node_subgraph': tf.placeholder(tf.int32, shape=(None), name='node_subgraph'),
+        'dropout': tf.placeholder(DTYPE, shape=(None), name='dropout'),
+        'adj_subgraph' : tf.sparse_placeholder(DTYPE,name='adj_subgraph',shape=(None,None)),
+        'adj_subgraph_0' : tf.sparse_placeholder(DTYPE,name='adj_subgraph_0'),
+        'adj_subgraph_1' : tf.sparse_placeholder(DTYPE,name='adj_subgraph_1'),
+        'adj_subgraph_2' : tf.sparse_placeholder(DTYPE,name='adj_subgraph_2'),
+        'adj_subgraph_3' : tf.sparse_placeholder(DTYPE,name='adj_subgraph_3'),
+        'adj_subgraph_4' : tf.sparse_placeholder(DTYPE,name='adj_subgraph_4'),
+        'adj_subgraph_5' : tf.sparse_placeholder(DTYPE,name='adj_subgraph_5'),
+        'adj_subgraph_6' : tf.sparse_placeholder(DTYPE,name='adj_subgraph_6'),
+        'adj_subgraph_7' : tf.sparse_placeholder(DTYPE,name='adj_subgraph_7'),
+        'dim0_adj_sub' : tf.placeholder(tf.int64,shape=(None),name='dim0_adj_sub'),
+        'norm_loss': tf.placeholder(DTYPE,shape=(None),name='norm_loss'),
+        'is_train': tf.placeholder(tf.bool, shape=(None), name='is_train')
+    }
+    return placeholders
+
+
+
+
+
+#########
+# TRAIN #
+#########
+def prepare(train_data,train_params,arch_gcn):
+    adj_full,adj_train,feats,class_arr,role = train_data
+    adj_full = adj_full.astype(np.int32)
+    adj_train = adj_train.astype(np.int32)
+    adj_full_norm = adj_norm(adj_full)
+    num_classes = class_arr.shape[1]
+
+    placeholders = construct_placeholders(num_classes)
+    minibatch = Minibatch(adj_full_norm, adj_train, role, class_arr, placeholders, train_params)
+    model = GraphSAINT(num_classes, placeholders,
+                feats, arch_gcn, train_params, adj_full_norm, logging=True)
+
+    # Initialize session
+    sess = tf.Session(config=tf.ConfigProto(device_count={"CPU":40},inter_op_parallelism_threads=44,intra_op_parallelism_threads=44,log_device_placement=args_global.log_device_placement))
+    ph_misc_stat = {'val_f1_micro': tf.placeholder(DTYPE, shape=()),
+                    'val_f1_macro': tf.placeholder(DTYPE, shape=()),
+                    'train_f1_micro': tf.placeholder(DTYPE, shape=()),
+                    'train_f1_macro': tf.placeholder(DTYPE, shape=()),
+                    'time_per_epoch': tf.placeholder(DTYPE, shape=()),
+                    'size_subgraph': tf.placeholder(tf.int32, shape=())}
+    merged = tf.summary.merge_all()
+
+    with tf.name_scope('summary'):
+        _misc_val_f1_micro = tf.summary.scalar('val_f1_micro', ph_misc_stat['val_f1_micro'])
+        _misc_val_f1_macro = tf.summary.scalar('val_f1_macro', ph_misc_stat['val_f1_macro'])
+        _misc_train_f1_micro = tf.summary.scalar('train_f1_micro', ph_misc_stat['train_f1_micro'])
+        _misc_train_f1_macro = tf.summary.scalar('train_f1_macro', ph_misc_stat['train_f1_macro'])
+        _misc_time_per_epoch = tf.summary.scalar('time_per_epoch',ph_misc_stat['time_per_epoch'])
+        _misc_size_subgraph = tf.summary.scalar('size_subgraph',ph_misc_stat['size_subgraph'])
+
+    misc_stats = tf.summary.merge([_misc_val_f1_micro,_misc_val_f1_macro,_misc_train_f1_micro,_misc_train_f1_macro,
+                    _misc_time_per_epoch,_misc_size_subgraph])
+    summary_writer = tf.summary.FileWriter(log_dir(args_global.train_config,args_global.data_prefix,git_branch,git_rev,timestamp), sess.graph)
+    # Init variables
+    sess.run(tf.global_variables_initializer())
+    return model,minibatch, sess, [merged,misc_stats],ph_misc_stat, summary_writer
+
+
+
+def train(train_phases,model,minibatch,\
+            sess,train_stat,ph_misc_stat,summary_writer):
+    import time
+
+    # saver = tf.train.Saver(var_list=tf.trainable_variables())
+    saver=tf.train.Saver()
+
+    epoch_ph_start = 0
+    f1mic_best, e_best = 0, 0
+    time_calc_f1, time_train, time_prepare = 0, 0, 0
+    options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE,report_tensor_allocations_upon_oom=True)
+    run_metadata = tf.RunMetadata()
+    many_runs_timeline=[]       # only used when TF timeline is enabled
+    for ip,phase in enumerate(train_phases):
+        # We normally only have a single phase of training (see README for defn of 'phase').
+        # On the other hand, our implementation does support multi-phase training. 
+        # e.g., you can use smaller subgraphs during initial epochs and larger subgraphs
+        #       when closer to convergence. -- This might speed up convergence. 
+        minibatch.set_sampler(phase)
+        num_batches = minibatch.num_training_batches()
+        printf('START PHASE {:4d}'.format(ip),style='underline')
+        for e in range(epoch_ph_start,int(phase['end'])):
+            printf('Epoch {:4d}'.format(e),style='bold')
+            minibatch.shuffle()
+            l_loss_tr, l_f1mic_tr, l_f1mac_tr, l_size_subg = [], [], [], []
+            time_train_ep, time_prepare_ep = 0, 0
+            while not minibatch.end():
+                t0 = time.time()
+                feed_dict, labels = minibatch.feed_dict(mode='train')
+                t1 = time.time()
+                if args_global.timeline:      # profile the code with Tensorflow Timeline
+                    _,__,loss_train,pred_train = sess.run([train_stat[0], \
+                            model.opt_op, model.loss, model.preds], feed_dict=feed_dict, \
+                            options=options, run_metadata=run_metadata)
+                    fetched_timeline = timeline.Timeline(run_metadata.step_stats)
+                    chrome_trace = fetched_timeline.generate_chrome_trace_format()
+                    many_runs_timeline.append(chrome_trace)
+                else:
+                    _,__,loss_train,pred_train = sess.run([train_stat[0], \
+                            model.opt_op, model.loss, model.preds], feed_dict=feed_dict, \
+                            options=tf.RunOptions(report_tensor_allocations_upon_oom=True))
+                t2 = time.time()
+                time_train_ep += t2-t1
+                time_prepare_ep += t1-t0
+                if not minibatch.batch_num % args_global.eval_train_every:
+                    f1_mic,f1_mac = calc_f1(labels,pred_train,model.sigmoid_loss)
+                    l_loss_tr.append(loss_train)
+                    l_f1mic_tr.append(f1_mic)
+                    l_f1mac_tr.append(f1_mac)
+                    l_size_subg.append(minibatch.size_subgraph)
+            time_train += time_train_ep
+            time_prepare += time_prepare_ep
+            if args_global.cpu_eval:      # Full batch evaluation using CPU
+                # we have to start a new session so that CPU can perform full-batch eval.
+                # current model params are communicated to the new session via tmp.chkpt
+                saver.save(sess,'./tmp.chkpt')
+                with tf.device('/cpu:0'):
+                    sess_cpu = tf.Session(config=tf.ConfigProto(device_count={'GPU': 0}))
+                    sess_cpu.run(tf.global_variables_initializer())
+                    saver = tf.train.Saver()
+                    saver.restore(sess_cpu, './tmp.chkpt')
+                    sess_eval=sess_cpu
+            else:
+                sess_eval=sess
+            loss_val,f1mic_val,f1mac_val,time_eval = \
+                evaluate_full_batch(sess_eval,model,minibatch,many_runs_timeline,mode='val')
+            printf(' TRAIN (Ep avg): loss = {:.4f}\tmic = {:.4f}\tmac = {:.4f}\ttrain time = {:.4f} sec'.format(f_mean(l_loss_tr),f_mean(l_f1mic_tr),f_mean(l_f1mac_tr),time_train_ep))
+            printf(' VALIDATION:     loss = {:.4f}\tmic = {:.4f}\tmac = {:.4f}'.format(loss_val,f1mic_val,f1mac_val),style='yellow')
+            if f1mic_val > f1mic_best:
+                f1mic_best, e_best = f1mic_val, e
+                if not os.path.exists(args_global.dir_log+'/models'):
+                    os.makedirs(args_global.dir_log+'/models')
+                print('  Saving models ...')
+                savepath = saver.save(sess, '{}/models/saved_model_{}.chkpt'.format(args_global.dir_log,timestamp),write_meta_graph=False,write_state=False)
+ 
+            if args_global.tensorboard:
+                misc_stat = sess.run([train_stat[1]],feed_dict={\
+                                        ph_misc_stat['val_f1_micro']: f1mic_val,
+                                        ph_misc_stat['val_f1_macro']: f1mac_val,
+                                        ph_misc_stat['train_f1_micro']: f_mean(l_f1mic_tr),
+                                        ph_misc_stat['train_f1_macro']: f_mean(l_f1mac_tr),
+                                        ph_misc_stat['time_per_epoch']: time_train_ep+time_prepare_ep,
+                                        ph_misc_stat['size_subgraph']: f_mean(l_size_subg)})
+                # tensorboard visualization
+                summary_writer.add_summary(_, e)
+                summary_writer.add_summary(misc_stat[0], e)
+        epoch_ph_start = int(phase['end'])
+    printf("Optimization Finished!",style='yellow')
+    timelines = TimeLiner()
+    for tl in many_runs_timeline:
+        timelines.update_timeline(tl)
+    timelines.save('timeline.json')
+    saver.restore(sess_eval, '{}/models/saved_model_{}.chkpt'.format(args_global.dir_log,timestamp))
+    loss_val, f1mic_val, f1mac_val, duration = evaluate_full_batch(sess_eval,model,minibatch,many_runs_timeline,mode='val')
+    printf("Full validation (Epoch {:4d}): \n  F1_Micro = {:.4f}\tF1_Macro = {:.4f}".format(e_best,f1mic_val,f1mac_val),style='red')
+    loss_test, f1mic_test, f1mac_test, duration = evaluate_full_batch(sess_eval,model,minibatch,many_runs_timeline,mode='test')
+    printf("Full test stats: \n  F1_Micro = {:.4f}\tF1_Macro = {:.4f}".format(f1mic_test,f1mac_test),style='red')
+    printf('Total training time: {:6.2f} sec'.format(time_train),style='red')
+    #ret = {'loss_val_opt':loss_val,'f1mic_val_opt':f1mic_val,'f1mac_val_opt':f1mac_val,\
+    #        'loss_test_opt':loss_test,'f1mic_test_opt':f1mic_test,'f1mac_test_opt':f1mac_test,\
+    #        'epoch_best':e_best,
+    #        'time_train': time_train}
+    return      # everything is logged by TF. no need to return anything
+
+
+########
+# MAIN #
+########
+
+def train_main(argv=None):
+    train_params,train_phases,train_data,arch_gcn = parse_n_prepare(args_global)
+    model,minibatch,sess,train_stat,ph_misc_stat,summary_writer = prepare(train_data,train_params,arch_gcn)
+    ret = train(train_phases,model,minibatch,sess,train_stat,ph_misc_stat,summary_writer)
+    return ret
+
+
+if __name__ == '__main__':
+    tf.app.run(main=train_main)
+
+
+File Path: graphsaint/utils.py
+Content:
+import numpy as np
+import json
+import pdb
+import scipy.sparse
+from sklearn.preprocessing import StandardScaler
+import os
+import yaml
+import scipy.sparse as sp
+from graphsaint.globals import *
+
+
+def load_data(prefix, normalize=True):
+    """
+    Load the various data files residing in the `prefix` directory.
+    Files to be loaded:
+        adj_full.npz        sparse matrix in CSR format, stored as scipy.sparse.csr_matrix
+                            The shape is N by N. Non-zeros in the matrix correspond to all
+                            the edges in the full graph. It doesn't matter if the two nodes
+                            connected by an edge are training, validation or test nodes.
+                            For unweighted graph, the non-zeros are all 1.
+        adj_train.npz       sparse matrix in CSR format, stored as a scipy.sparse.csr_matrix
+                            The shape is also N by N. However, non-zeros in the matrix only
+                            correspond to edges connecting two training nodes. The graph
+                            sampler only picks nodes/edges from this adj_train, not adj_full.
+                            Therefore, neither the attribute information nor the structural
+                            information are revealed during training. Also, note that only
+                            a x N rows and cols of adj_train contains non-zeros. For
+                            unweighted graph, the non-zeros are all 1.
+        role.json           a dict of three keys. Key 'tr' corresponds to the list of all
+                              'tr':     list of all training node indices
+                              'va':     list of all validation node indices
+                              'te':     list of all test node indices
+                            Note that in the raw data, nodes may have string-type ID. You
+                            need to re-assign numerical ID (0 to N-1) to the nodes, so that
+                            you can index into the matrices of adj, features and class labels.
+        class_map.json      a dict of length N. Each key is a node index, and each value is
+                            either a length C binary list (for multi-class classification)
+                            or an integer scalar (0 to C-1, for single-class classification).
+        feats.npz           a numpy array of shape N by F. Row i corresponds to the attribute
+                            vector of node i.
+
+    Inputs:
+        prefix              string, directory containing the above graph related files
+        normalize           bool, whether or not to normalize the node features
+
+    Outputs:
+        adj_full            scipy sparse CSR (shape N x N, |E| non-zeros), the adj matrix of
+                            the full graph, with N being total num of train + val + test nodes.
+        adj_train           scipy sparse CSR (shape N x N, |E'| non-zeros), the adj matrix of
+                            the training graph. While the shape is the same as adj_full, the
+                            rows/cols corresponding to val/test nodes in adj_train are all-zero.
+        feats               np array (shape N x f), the node feature matrix, with f being the
+                            length of each node feature vector.
+        class_map           dict, where key is the node ID and value is the classes this node
+                            belongs to.
+        role                dict, where keys are: 'tr' for train, 'va' for validation and 'te'
+                            for test nodes. The value is the list of IDs of nodes belonging to
+                            the train/val/test sets.
+    """
+    adj_full = scipy.sparse.load_npz('./{}/adj_full.npz'.format(prefix)).astype(np.bool)
+    adj_train = scipy.sparse.load_npz('./{}/adj_train.npz'.format(prefix)).astype(np.bool)
+    role = json.load(open('./{}/role.json'.format(prefix)))
+    feats = np.load('./{}/feats.npy'.format(prefix))
+    class_map = json.load(open('./{}/class_map.json'.format(prefix)))
+    class_map = {int(k):v for k,v in class_map.items()}
+    assert len(class_map) == feats.shape[0]
+    # ---- normalize feats ----
+    train_nodes = np.array(list(set(adj_train.nonzero()[0])))
+    train_feats = feats[train_nodes]
+    scaler = StandardScaler()
+    scaler.fit(train_feats)
+    feats = scaler.transform(feats)
+    # -------------------------
+    return adj_full, adj_train, feats, class_map, role
+
+
+def process_graph_data(adj_full, adj_train, feats, class_map, role):
+    """
+    setup vertex property map for output classes, train/val/test masks, and feats
+    """
+    num_vertices = adj_full.shape[0]
+    if isinstance(list(class_map.values())[0],list):
+        num_classes = len(list(class_map.values())[0])
+        class_arr = np.zeros((num_vertices, num_classes))
+        for k,v in class_map.items():
+            class_arr[k] = v
+    else:
+        num_classes = max(class_map.values()) - min(class_map.values()) + 1
+        class_arr = np.zeros((num_vertices, num_classes))
+        offset = min(class_map.values())
+        for k,v in class_map.items():
+            class_arr[k][v-offset] = 1
+    return adj_full, adj_train, feats, class_arr, role
+
+
+def parse_layer_yml(arch_gcn,dim_input):
+    """
+    Parse the *.yml config file to retrieve the GNN structure.
+    """
+    num_layers = len(arch_gcn['arch'].split('-'))
+    # set default values, then update by arch_gcn
+    bias_layer = [arch_gcn['bias']]*num_layers
+    act_layer = [arch_gcn['act']]*num_layers
+    aggr_layer = [arch_gcn['aggr']]*num_layers
+    dims_layer = [arch_gcn['dim']]*num_layers
+    order_layer = [int(o) for o in arch_gcn['arch'].split('-')]
+    return [dim_input]+dims_layer,order_layer,act_layer,bias_layer,aggr_layer
+
+
+def parse_n_prepare(flags):
+    with open(flags.train_config) as f_train_config:
+        train_config = yaml.safe_load(f_train_config)
+    arch_gcn = {
+        'dim': -1,
+        'aggr': 'concat',
+        'loss': 'softmax',
+        'arch': '1',
+        'act': 'I',
+        'bias': 'norm'
+    }
+    arch_gcn.update(train_config['network'][0])
+    train_params = {
+        'lr': 0.01,
+        'weight_decay': 0.,
+        'norm_loss': True,
+        'norm_aggr': True,
+        'q_threshold': 50,
+        'q_offset': 0
+    }
+    train_params.update(train_config['params'][0])
+    train_phases = train_config['phase']
+    for ph in train_phases:
+        assert 'end' in ph
+        assert 'sampler' in ph
+    print("Loading training data..")
+    temp_data = load_data(flags.data_prefix)
+    train_data = process_graph_data(*temp_data)
+    print("Done loading training data..")
+    return train_params,train_phases,train_data,arch_gcn
+
+
+
+
+
+def log_dir(f_train_config,prefix,git_branch,git_rev,timestamp):
+    import getpass
+    log_dir = args_global.dir_log+"/log_train/" + prefix.split("/")[-1]
+    log_dir += "/{ts}-{model}-{gitrev:s}/".format(
+            model='graphsaint',
+            gitrev=git_rev.strip(),
+            ts=timestamp)
+    if not os.path.exists(log_dir):
+        os.makedirs(log_dir)
+    if f_train_config != '':
+        from shutil import copyfile
+        copyfile(f_train_config,'{}/{}'.format(log_dir,f_train_config.split('/')[-1]))
+    return log_dir
+
+def sess_dir(dims,train_config,prefix,git_branch,git_rev,timestamp):
+    import getpass
+    log_dir = "saved_models/" + prefix.split("/")[-1]
+    log_dir += "/{ts}-{model}-{gitrev:s}-{layer}/".format(
+            model='graphsaint',
+            gitrev=git_rev.strip(),
+            layer='-'.join(dims),
+            ts=timestamp)
+    if not os.path.exists(log_dir):
+        os.makedirs(log_dir)
+    return sess_dir
+
+
+def adj_norm(adj, deg=None, sort_indices=True):
+    """
+    Normalize adj according to the method of rw normalization.
+    Note that sym norm is used in the original GCN paper (kipf),
+    while rw norm is used in GraphSAGE and some other variants.
+    Here we don't perform sym norm since it doesn't seem to
+    help with accuracy improvement.
+
+    # Procedure:
+    #       1. adj add self-connection --> adj'
+    #       2. D' deg matrix from adj'
+    #       3. norm by D^{-1} x adj'
+    if sort_indices is True, we re-sort the indices of the returned adj
+    Note that after 'dot' the indices of a node would be in descending order
+    rather than ascending order
+    """
+    diag_shape = (adj.shape[0],adj.shape[1])
+    D = adj.sum(1).flatten() if deg is None else deg
+    norm_diag = sp.dia_matrix((1/D,0),shape=diag_shape)
+    adj_norm = norm_diag.dot(adj)
+    if sort_indices:
+        adj_norm.sort_indices()
+    return adj_norm
+
+
+
+
+##################
+# PRINTING UTILS #
+#----------------#
+
+_bcolors = {'header': '\033[95m',
+            'blue': '\033[94m',
+            'green': '\033[92m',
+            'yellow': '\033[93m',
+            'red': '\033[91m',
+            'bold': '\033[1m',
+            'underline': '\033[4m'}
+
+
+def printf(msg,style=''):
+    if not style or style == 'black':
+        print(msg)
+    else:
+        print("{color1}{msg}{color2}".format(color1=_bcolors[style],msg=msg,color2='\033[0m'))
+
+File Path: ipdps19_cpp/convert.py
+Content:
+import scipy.sparse as sp
+import numpy as np
+import networkx as nx
+import sys
+import json
+import os
+from networkx.readwrite import json_graph
+
+if len(sys.argv)==1:
+    datasets=['ppi','flickr','reddit','amazon']
+else:
+    datasets=[sys.argv[1]]
+
+for dataset in datasets:
+    print('start ',dataset)
+    baseline_str='../data.cpp/'+dataset+'/'
+    dataset_str='../data/'+dataset+'/'
+    if not os.path.exists(baseline_str[:-1]):
+        os.mkdir(baseline_str[:-1])
+
+    adj_full=sp.load_npz(dataset_str+'adj_full.npz')
+    adj_train=sp.load_npz(dataset_str+'adj_train.npz')
+    role=json.load(open(dataset_str+'role.json','r'))
+    feats=np.load(dataset_str+'feats.npy')
+    class_map=json.load(open(dataset_str+'class_map.json','r'))
+    if dataset=='reddit':
+        class_map_np=np.zeros((len(class_map),41))
+        for i in range(len(class_map)):
+            class_map_np[i,class_map[str(i)]]=1
+    elif dataset=='flickr':
+        class_map_np=np.zeros((len(class_map),7))
+        for i in range(len(class_map)):
+            class_map_np[i,class_map[str(i)]]=1
+    else:
+        class_map_np=np.zeros((len(class_map),len(class_map['0'])))
+        for i in range(len(class_map)):
+            class_map_np[i]=class_map[str(i)]
+    # import pdb; pdb.set_trace();
+
+    dims=np.zeros((11,))
+    dims[0]=adj_train.indices.shape[0]
+    dims[1]=adj_train.indptr.shape[0]
+    dims[2]=adj_full.indices.shape[0]
+    dims[3]=adj_full.indptr.shape[0]
+    dims[4]=len(role['tr'])
+    dims[5]=len(role['te'])
+    dims[6]=len(role['va'])
+    dims[7]=feats.shape[0]
+    dims[8]=feats.shape[1]
+    dims[9]=class_map_np.shape[0]
+    dims[10]=class_map_np.shape[1]
+    dims.astype(np.int32).tofile(baseline_str+'dims.bin')
+
+    adj_train.indices.astype(np.int32).tofile(baseline_str+'adj_train_indices.bin')
+    adj_train.indptr.astype(np.int32).tofile(baseline_str+'adj_train_indptr.bin')
+    adj_full.indices.astype(np.int32).tofile(baseline_str+'adj_full_indices.bin')
+    adj_full.indptr.astype(np.int32).tofile(baseline_str+'adj_full_indptr.bin')
+    np.array(role['tr']).astype(np.int32).tofile(baseline_str+'node_train.bin')
+    np.array(role['te']).astype(np.int32).tofile(baseline_str+'node_test.bin')
+    np.array(role['va']).astype(np.int32).tofile(baseline_str+'node_val.bin')
+
+    from sklearn.preprocessing import StandardScaler
+    train_feats=feats[np.array(role['tr'])]
+    scaler=StandardScaler()
+    scaler.fit(train_feats)
+    feats=scaler.transform(feats)
+    feats.T.astype(np.float64).tofile(baseline_str+'feats_norm_col.bin')
+
+    class_map_np.T.astype(np.float64).tofile(baseline_str+'labels_col.bin')
+Output:
+{
+    "experimental_code": "File Path: graphsaint/graph_samplers.py\nclass GraphSampler:\n    def __init__(self, adj_train, node_train, size_subgraph, args_preproc):\n        self.adj_train = adj_train\n        self.node_train = np.unique(node_train).astype(np.int32)\n        self.size_subgraph = size_subgraph\n        self.name_sampler = 'None'\n        self.node_subgraph = None\n        self.preproc(**args_preproc)\n\n    def preproc(self, **kwargs):\n        pass\n\n    def par_sample(self, stage, **kwargs):\n        return self.cy_sampler.par_sample()\n\n    def _helper_extract_subgraph(self, node_ids):\n        node_ids = np.unique(node_ids)\n        node_ids.sort()\n        orig2subg = {n: i for i, n in enumerate(node_ids)}\n        n = node_ids.size\n        indptr = np.zeros(node_ids.size + 1)\n        indices = []\n        subg_edge_index = []\n        subg_nodes = node_ids\n        for nid in node_ids:\n            idx_s, idx_e = self.adj_train.indptr[nid], self.adj_train.indptr[nid + 1]\n            neighs = self.adj_train.indices[idx_s : idx_e]\n            for i_n, n in enumerate(neighs):\n                if n in orig2subg:\n                    indices.append(orig2subg[n])\n                    indptr[orig2subg[nid] + 1] += 1\n                    subg_edge_index.append(idx_s + i_n)\n        indptr = indptr.cumsum().astype(np.int64)\n        indices = np.array(indices)\n        subg_edge_index = np.array(subg_edge_index)\n        data = np.ones(indices.size)\n        assert indptr[-1] == indices.size == subg_edge_index.size\n        return indptr, indices, data, subg_nodes, subg_edge_index\n\nclass rw_sampling(GraphSampler):\n    def __init__(self, adj_train, node_train, size_subgraph, size_root, size_depth):\n        self.size_root = size_root\n        self.size_depth = size_depth\n        size_subgraph = size_root * size_depth\n        super().__init__(adj_train, node_train, size_subgraph, {})\n        self.cy_sampler = cy.RW(\n            self.adj_train.indptr,\n            self.adj_train.indices,\n            self.node_train,\n            NUM_PAR_SAMPLER,\n            SAMPLES_PER_PROC,\n            self.size_root,\n            self.size_depth\n        )\n\n    def preproc(self, **kwargs):\n        pass\n\nclass edge_sampling(GraphSampler):\n    def __init__(self,adj_train,node_train,num_edges_subgraph):\n        self.num_edges_subgraph = num_edges_subgraph\n        self.size_subgraph = num_edges_subgraph * 2\n        self.deg_train = np.array(adj_train.sum(1)).flatten()\n        self.adj_train_norm = scipy.sparse.dia_matrix((1 / self.deg_train, 0), shape=adj_train.shape).dot(adj_train)\n        super().__init__(adj_train, node_train, self.size_subgraph, {})\n        self.cy_sampler = cy.Edge2(\n            self.adj_train.indptr,\n            self.adj_train.indices,\n            self.node_train,\n            NUM_PAR_SAMPLER,\n            SAMPLES_PER_PROC,\n            self.edge_prob_tri.row,\n            self.edge_prob_tri.col,\n            self.edge_prob_tri.data.cumsum(),\n            self.num_edges_subgraph,\n        )\n\n    def preproc(self,**kwargs):\n        self.edge_prob = scipy.sparse.csr_matrix(\n            (\n                np.zeros(self.adj_train.size),\n                self.adj_train.indices,\n                self.adj_train.indptr\n            ),\n            shape=self.adj_train.shape,\n        )\n        self.edge_prob.data[:] = self.adj_train_norm.data[:]\n        _adj_trans = scipy.sparse.csr_matrix.tocsc(self.adj_train_norm)\n        self.edge_prob.data += _adj_trans.data\n        self.edge_prob.data *= 2 * self.num_edges_subgraph / self.edge_prob.data.sum()\n        self.edge_prob_tri = scipy.sparse.triu(self.edge_prob).astype(np.float32)\n\nclass mrw_sampling(GraphSampler):\n    def __init__(self, adj_train, node_train, size_subgraph, size_frontier, max_deg=10000):\n        self.p_dist = None\n        super().__init__(adj_train, node_train, size_subgraph, {})\n        self.size_frontier = size_frontier\n        self.deg_train = np.bincount(self.adj_train.nonzero()[0])\n        self.name_sampler = 'MRW'\n        self.max_deg = int(max_deg)\n        self.cy_sampler = cy.MRW(\n            self.adj_train.indptr,\n            self.adj_train.indices,\n            self.node_train,\n            NUM_PAR_SAMPLER,\n            SAMPLES_PER_PROC,\n            self.p_dist,\n            self.max_deg,\n            self.size_frontier,\n            self.size_subgraph\n        )\n\n    def preproc(self,**kwargs):\n        _adj_hop = self.adj_train\n        self.p_dist = np.array(\n            [\n                _adj_hop.data[_adj_hop.indptr[v] : _adj_hop.indptr[v + 1]].sum()\n                for v in range(_adj_hop.shape[0])\n            ],\n            dtype=np.int32,\n        )\n\n\nclass node_sampling(GraphSampler):\n    def __init__(self, adj_train, node_train, size_subgraph):\n        self.p_dist = np.zeros(len(node_train))\n        super().__init__(adj_train, node_train, size_subgraph, {})\n        self.cy_sampler = cy.Node(\n            self.adj_train.indptr,\n            self.adj_train.indices,\n            self.node_train,\n            NUM_PAR_SAMPLER,\n            SAMPLES_PER_PROC,\n            self.p_dist,\n            self.size_subgraph,\n        )\n\n    def preproc(self, **kwargs):\n        _p_dist = np.array(\n            [\n                self.adj_train.data[\n                    self.adj_train.indptr[v] : self.adj_train.indptr[v + 1]\n                ].sum()\n                for v in self.node_train\n            ],\n            dtype=np.int64,\n        )\n        self.p_dist = _p_dist.cumsum()\n        if self.p_dist[-1] > 2**31 - 1:\n            print('warning: total deg exceeds 2**31')\n            self.p_dist = self.p_dist.astype(np.float64)\n            self.p_dist /= self.p_dist[-1] / (2**31 - 1)\n        self.p_dist = self.p_dist.astype(np.int32)\n\n\nFile Path: graphsaint/pytorch_version/minibatch.py\nclass Minibatch:\n    def __init__(self, adj_full_norm, adj_train, role, train_params, cpu_eval=False):\n        self.use_cuda = (args_global.gpu >= 0)\n        if cpu_eval:\n            self.use_cuda=False\n        self.node_train = np.array(role['tr'])\n        self.node_val = np.array(role['va'])\n        self.node_test = np.array(role['te'])\n        self.adj_full_norm = _coo_scipy2torch(adj_full_norm.tocoo())\n        self.adj_train = adj_train\n        if self.use_cuda:\n            self.adj_full_norm = self.adj_full_norm.cuda()\n        self.node_subgraph = None\n        self.batch_num = -1\n        self.method_sample = None\n        self.subgraphs_remaining_indptr = []\n        self.subgraphs_remaining_indices = []\n        self.subgraphs_remaining_data = []\n        self.subgraphs_remaining_nodes = []\n        self.subgraphs_remaining_edge_index = []\n        self.norm_loss_train = np.zeros(self.adj_train.shape[0])\n        self.norm_loss_test = np.zeros(self.adj_full_norm.shape[0])\n        _denom = len(self.node_train) + len(self.node_val) +  len(self.node_test)\n        self.norm_loss_test[self.node_train] = 1. / _denom\n        self.norm_loss_test[self.node_val] = 1. / _denom\n        self.norm_loss_test[self.node_test] = 1. / _denom\n        self.norm_loss_test = torch.from_numpy(self.norm_loss_test.astype(np.float32))\n        if self.use_cuda:\n            self.norm_loss_test = self.norm_loss_test.cuda()\n        self.norm_aggr_train = np.zeros(self.adj_train.size)\n        self.sample_coverage = train_params['sample_coverage']\n        self.deg_train = np.array(self.adj_train.sum(1)).flatten()\n\n    def set_sampler(self, train_phases):\n        self.subgraphs_remaining_indptr = []\n        self.subgraphs_remaining_indices = []\n        self.subgraphs_remaining_data = []\n        self.subgraphs_remaining_nodes = []\n        self.subgraphs_remaining_edge_index = []\n        self.method_sample = train_phases['sampler']\n        if self.method_sample == 'mrw':\n            if 'deg_clip' in train_phases:\n                _deg_clip = int(train_phases['deg_clip'])\n            else:\n                _deg_clip = 100000\n            self.size_subg_budget = train_phases['size_subgraph']\n            self.graph_sampler = mrw_sampling(\n                self.adj_train,\n                self.node_train,\n                self.size_subg_budget,\n                train_phases['size_frontier'],\n                _deg_clip,\n            )\n        elif self.method_sample == 'rw':\n            self.size_subg_budget = train_phases['num_root'] * train_phases['depth']\n            self.graph_sampler = rw_sampling(\n                self.adj_train,\n                self.node_train,\n                self.size_subg_budget,\n                int(train_phases['num_root']),\n                int(train_phases['depth']),\n            )\n        elif self.method_sample == 'edge':\n            self.size_subg_budget = train_phases['size_subg_edge'] * 2\n            self.graph_sampler = edge_sampling(\n                self.adj_train,\n                self.node_train,\n                train_phases['size_subg_edge'],\n            )\n        elif self.method_sample == 'node':\n            self.size_subg_budget = train_phases['size_subgraph']\n            self.graph_sampler = node_sampling(\n                self.adj_train,\n                self.node_train,\n                self.size_subg_budget,\n            )\n        elif self.method_sample == 'full_batch':\n            self.size_subg_budget = self.node_train.size\n            self.graph_sampler = full_batch_sampling(\n                self.adj_train,\n                self.node_train,\n                self.size_subg_budget,\n            )\n        elif self.method_sample == \"vanilla_node_python\":\n            self.size_subg_budget = train_phases[\"size_subgraph\"]\n            self.graph_sampler = NodeSamplingVanillaPython(\n                self.adj_train,\n                self.node_train,\n                self.size_subg_budget,\n            )\n        else:\n            raise NotImplementedError\n\n        self.norm_loss_train = np.zeros(self.adj_train.shape[0])\n        self.norm_aggr_train = np.zeros(self.adj_train.size).astype(np.float32)\n\n        tot_sampled_nodes = 0\n        while True:\n            self.par_graph_sample('train')\n            tot_sampled_nodes = sum([len(n) for n in self.subgraphs_remaining_nodes])\n            if tot_sampled_nodes > self.sample_coverage * self.node_train.size:\n                break\n        print()\n        num_subg = len(self.subgraphs_remaining_nodes)\n        for i in range(num_subg):\n            self.norm_aggr_train[self.subgraphs_remaining_edge_index[i]] += 1\n            self.norm_loss_train[self.subgraphs_remaining_nodes[i]] += 1\n        assert self.norm_loss_train[self.node_val].sum() + self.norm_loss_train[self.node_test].sum() == 0\n        for v in range(self.adj_train.shape[0]):\n            i_s = self.adj_train.indptr[v]\n            i_e = self.adj_train.indptr[v + 1]\n            val = np.clip(self.norm_loss_train[v] / self.norm_aggr_train[i_s : i_e], 0, 1e4)\n            val[np.isnan(val)] = 0.1\n            self.norm_aggr_train[i_s : i_e] = val\n        self.norm_loss_train[np.where(self.norm_loss_train==0)[0]] = 0.1\n        self.norm_loss_train[self.node_val] = 0\n        self.norm_loss_train[self.node_test] = 0\n        self.norm_loss_train[self.node_train] = num_subg / self.norm_loss_train[self.node_train] / self.node_train.size\n        self.norm_loss_train = torch.from_numpy(self.norm_loss_train.astype(np.float32))\n        if self.use_cuda:\n            self.norm_loss_train = self.norm_loss_train.cuda()\n\n    def par_graph_sample(self,phase):\n        t0 = time.time()\n        _indptr, _indices, _data, _v, _edge_index = self.graph_sampler.par_sample(phase)\n        t1 = time.time()\n        print('sampling 200 subgraphs:   time = {:.3f} sec'.format(t1 - t0), end=\"\\r\")\n        self.subgraphs_remaining_indptr.extend(_indptr)\n        self.subgraphs_remaining_indices.extend(_indices)\n        self.subgraphs_remaining_data.extend(_data)\n        self.subgraphs_remaining_nodes.extend(_v)\n        self.subgraphs_remaining_edge_index.extend(_edge_index)\n\n    def one_batch(self, mode='train'):\n        if mode in ['val','test','valtest']:\n            self.node_subgraph = np.arange(self.adj_full_norm.shape[0])\n            adj = self.adj_full_norm\n        else:\n            assert mode == 'train'\n            if len(self.subgraphs_remaining_nodes) == 0:\n                self.par_graph_sample('train')\n                print()\n            self.node_subgraph = self.subgraphs_remaining_nodes.pop()\n            self.size_subgraph = len(self.node_subgraph)\n            adj = sp.csr_matrix(\n                (\n                    self.subgraphs_remaining_data.pop(),\n                    self.subgraphs_remaining_indices.pop(),\n                    self.subgraphs_remaining_indptr.pop()),\n                    shape=(self.size_subgraph,self.size_subgraph,\n                )\n            )\n            adj_edge_index = self.subgraphs_remaining_edge_index.pop()\n            norm_aggr(adj.data, adj_edge_index, self.norm_aggr_train, num_proc=args_global.num_cpu_core)\n            adj = adj_norm(adj, deg=self.deg_train[self.node_subgraph])\n            adj = _coo_scipy2torch(adj.tocoo())\n            if self.use_cuda:\n                adj = adj.cuda()\n            self.batch_num += 1\n        norm_loss = self.norm_loss_test if mode in ['val','test', 'valtest'] else self.norm_loss_train\n        norm_loss = norm_loss[self.node_subgraph]\n        return self.node_subgraph, adj, norm_loss\n\n\nFile Path: graphsaint/pytorch_version/layers.py\nclass HighOrderAggregator(nn.Module):\n    def __init__(self, dim_in, dim_out, dropout=0., act='relu', \\\n            order=1, aggr='mean', bias='norm-nn', **kwargs):\n        super(HighOrderAggregator,self).__init__()\n        assert bias in ['bias', 'norm', 'norm-nn']\n        self.order, self.aggr = order, aggr\n        self.act, self.bias = F_ACT[act], bias\n        self.dropout = dropout\n        self.f_lin, self.f_bias = [], []\n        self.offset, self.scale = [], []\n        self.num_param = 0\n        for o in range(self.order + 1):\n            self.f_lin.append(nn.Linear(dim_in, dim_out, bias=False))\n            nn.init.xavier_uniform_(self.f_lin[-1].weight)\n            self.f_bias.append(nn.Parameter(torch.zeros(dim_out)))\n            self.num_param += dim_in * dim_out\n            self.num_param += dim_out\n            self.offset.append(nn.Parameter(torch.zeros(dim_out)))\n            self.scale.append(nn.Parameter(torch.ones(dim_out)))\n            if self.bias == 'norm' or self.bias == 'norm-nn':\n                self.num_param += 2 * dim_out\n        self.f_lin = nn.ModuleList(self.f_lin)\n        self.f_dropout = nn.Dropout(p=self.dropout)\n        self.params = nn.ParameterList(self.f_bias + self.offset + self.scale)\n        self.f_bias = self.params[:self.order + 1]\n        if self.bias == 'norm':\n            self.offset = self.params[self.order + 1 : 2 * self.order + 2]\n            self.scale = self.params[2 * self.order + 2 : ]\n        elif self.bias == 'norm-nn':\n            final_dim_out = dim_out * ((aggr=='concat') * (order + 1) + (aggr=='mean'))\n            self.f_norm = nn.BatchNorm1d(final_dim_out, eps=1e-9, track_running_stats=True)\n        self.num_param = int(self.num_param)\n\n    def _spmm(self, adj_norm, _feat):\n        return torch.sparse.mm(adj_norm, _feat)\n\n    def _f_feat_trans(self, _feat, _id):\n        feat = self.act(self.f_lin[_id](_feat) + self.f_bias[_id])\n        if self.bias == 'norm':\n            mean = feat.mean(dim=1).view(feat.shape[0],1)\n            var = feat.var(dim=1, unbiased=False).view(feat.shape[0], 1) + 1e-9\n            feat_out = (feat - mean) * self.scale[_id] * torch.rsqrt(var) + self.offset[_id]\n        else:\n            feat_out = feat\n        return feat_out\n\n    def forward(self, inputs):\n        adj_norm, feat_in = inputs\n        feat_in = self.f_dropout(feat_in)\n        feat_hop = [feat_in]\n        for o in range(self.order):\n            feat_hop.append(self._spmm(adj_norm, feat_hop[-1]))\n        feat_partial = [self._f_feat_trans(ft, idf) for idf, ft in enumerate(feat_hop)]\n        if self.aggr == 'mean':\n            feat_out = feat_partial[0]\n            for o in range(len(feat_partial) - 1):\n                feat_out += feat_partial[o + 1]\n        elif self.aggr == 'concat':\n            feat_out = torch.cat(feat_partial, 1)\n        else:\n            raise NotImplementedError\n        if self.bias == 'norm-nn':\n            feat_out = self.f_norm(feat_out)\n        return adj_norm, feat_out\n\nclass AttentionAggregator(nn.Module):\n    def __init__(self, dim_in, dim_out, dropout=0., act='relu', \\\n            order=1, aggr='mean', bias='norm', mulhead=1):\n        super(AttentionAggregator,self).__init__()\n        assert bias in ['bias', 'norm', 'norm-nn']\n        self.num_param = 0\n        self.mulhead = mulhead\n        self.order, self.aggr = order, aggr\n        self.act, self.bias = F_ACT[act], bias\n        self.att_act = nn.LeakyReLU(negative_slope=0.2)\n        self.dropout = dropout\n        self._f_lin = []\n        self._offset, self._scale = [], []\n        self._attention = []\n        for o in range(self.order+1):\n            for i in range(self.mulhead):\n                self._f_lin.append(nn.Linear(dim_in, int(dim_out / self.mulhead), bias=True))\n                nn.init.xavier_uniform_(self._f_lin[-1].weight)\n                self._offset.append(nn.Parameter(torch.zeros(int(dim_out / self.mulhead))))\n                self._scale.append(nn.Parameter(torch.ones(int(dim_out / self.mulhead))))\n                self.num_param += dim_in * dim_out / self.mulhead + 2 * dim_out / self.mulhead\n                if o < self.order:\n                    self._attention.append(nn.Parameter(torch.ones(1, int(dim_out / self.mulhead * 2))))\n                    nn.init.xavier_uniform_(self._attention[-1])\n                    self.num_param += dim_out / self.mulhead * 2\n        self.mods = nn.ModuleList(self._f_lin)\n        self.f_dropout = nn.Dropout(p=self.dropout)\n        self.params = nn.ParameterList(self._offset + self._scale + self._attention)\n        self.f_lin = []\n        self.offset, self.scale = [], []\n        self.attention = []\n        for o in range(self.order+1):\n            self.f_lin.append([])\n            self.offset.append([])\n            self.scale.append([])\n            self.attention.append([])\n            for i in range(self.mulhead):\n                self.f_lin[-1].append(self.mods[o * self.mulhead + i])\n                if self.bias == 'norm':\n                    self.offset[-1].append(self.params[o * self.mulhead + i])\n                    self.scale[-1].append(self.params[len(self._offset) + o * self.mulhead + i])\n                if o < self.order:\n                    self.attention[-1].append(self.params[len(self._offset) * 2 + o * self.mulhead + i])\n        if self.bias == 'norm-nn':\n            final_dim_out = dim_out*((aggr=='concat')*(order+1) + (aggr=='mean'))\n            self.f_norm = nn.BatchNorm1d(final_dim_out, eps=1e-9, track_running_stats=True)\n        self.num_param = int(self.num_param)\n\n    def _spmm(self, adj_norm, _feat):\n        return torch.sparse.mm(adj_norm, _feat)\n\n    def _f_feat_trans(self, _feat, f_lin):\n        feat_out = []\n        for i in range(self.mulhead):\n            feat_out.append(self.act(f_lin[i](_feat)))\n        return feat_out\n\n    def _aggregate_attention(self, adj, feat_neigh, feat_self, attention):\n        attention_self = self.att_act(attention[:, : feat_self.shape[1]].mm(feat_self.t())).squeeze()\n        attention_neigh = self.att_act(attention[:, feat_neigh.shape[1] :].mm(feat_neigh.t())).squeeze()\n        attention_norm = (attention_self[adj._indices()[0]] + attention_neigh[adj._indices()[1]]) * adj._values()\n        att_adj = torch.sparse.FloatTensor(adj._indices(), attention_norm, torch.Size(adj.shape))\n        return self._spmm(att_adj, feat_neigh)\n\n    def forward(self, inputs):\n        adj_norm, feat_in = inputs\n        feat_in = self.f_dropout(feat_in)\n        feat_partial = []\n        for o in range(self.order + 1):\n            feat_partial.append(self._f_feat_trans(feat_in, self.f_lin[o]))\n        for o in range(1,self.order + 1):\n            for s in range(o):\n                for i in range(self.mulhead):\n                    feat_partial[o][i] = self._aggregate_attention(\n                        adj_norm,\n                        feat_partial[o][i],\n                        feat_partial[o - s - 1][i],\n                        self.attention[o-1][i],\n                    )\n        if self.bias == 'norm':\n            for o in range(self.order + 1):\n                for i in range(self.mulhead):\n                    mean = feat_partial[o][i].mean(dim=1).unsqueeze(1)\n                    var = feat_partial[o][i].var(dim=1, unbiased=False).unsqueeze(1) + 1e-9\n                    feat_partial[o][i] = (feat_partial[o][i] - mean) \\\n                                * self.scale[o][i] * torch.rsqrt(var) + self.offset[o][i]\n\n        for o in range(self.order + 1):\n            feat_partial[o] = torch.cat(feat_partial[o], 1)\n        if self.aggr == 'mean':\n            feat_out = feat_partial[0]\n            for o in range(len(feat_partial) - 1):\n                feat_out += feat_partial[o + 1]\n        elif self.aggr == 'concat':\n            feat_out = torch.cat(feat_partial, 1)\n        else:\n            raise NotImplementedError\n        if self.bias == 'norm-nn':\n            feat_out = self.f_norm(feat_out)\n        return adj_norm, feat_out\n\nclass GatedAttentionAggregator(nn.Module):\n    def __init__(\n        self,\n        dim_in,\n        dim_out,\n        dropout=0.0,\n        act=\"relu\",\n        order=1,\n        aggr=\"mean\",\n        bias=\"norm\",\n        mulhead=1,\n        dim_gate=64,\n    ):\n        super(GatedAttentionAggregator, self).__init__()\n        self.num_param = 0\n        self.multi_head = mulhead\n        assert self.multi_head > 0 and dim_out % self.multi_head == 0\n        self.order, self.aggr = order, aggr\n        self.act, self.bias = F_ACT[act], bias\n        self.att_act = nn.LeakyReLU(negative_slope=0.2)\n        self.dropout = dropout\n        self.dim_gate = dim_gate\n        self._f_lin = []\n        self._offset, self._scale = [], []\n        self._attention = []\n        for i in range(self.order + 1):\n            self._offset.append(nn.Parameter(torch.zeros(dim_out)))\n            self._scale.append(nn.Parameter(torch.ones(dim_out)))\n            for _j in range(self.multi_head):\n                self._f_lin.append(\n                    nn.Linear(dim_in, int(dim_out / self.multi_head), bias=True)\n                )\n                nn.init.xavier_uniform_(self._f_lin[-1].weight)\n                if i < self.order:\n                    self._attention.append(\n                        nn.Parameter(torch.ones(1, int(dim_out / self.multi_head * 2)))\n                    )\n                    nn.init.xavier_uniform_(self._attention[-1])\n        self._weight_gate = nn.Parameter(\n            torch.ones(dim_in * 2 + dim_gate, self.multi_head)\n        )\n        nn.init.xavier_uniform_(self._weight_gate)\n        self._weight_pool_gate = nn.Parameter(torch.ones(dim_in, dim_gate))\n        nn.init.xavier_uniform_(self._weight_pool_gate)\n        self.mods = nn.ModuleList(self._f_lin)\n        self.f_dropout = nn.Dropout(p=self.dropout)\n        self.params = nn.ParameterList(\n            self._offset\n            + self._scale\n            + self._attention\n            + [self._weight_gate, self._weight_pool_gate]\n        )\n        self.f_lin = []\n        self.offset, self.scale = [], []\n        self.attention = []\n        for i in range(self.order + 1):\n            self.f_lin.append([])\n            self.attention.append([])\n            self.offset.append(self.params[i])\n            self.scale.append(self.params[len(self._offset) + i])\n            for j in range(self.multi_head):\n                self.f_lin[-1].append(self.mods[i * self.multi_head + j])\n                if i < self.order:\n                    self.attention[-1].append(\n                        self.params[len(self._offset) * 2 + i * self.multi_head + j]\n                    )\n        self.weight_gate = self.params[-2]\n        self.weight_pool_gate = self.params[-1]\n\n    def _spmm(self, adj_norm, _feat):\n        return torch.sparse.mm(adj_norm, _feat)\n\n    def _f_feat_trans(self, _feat, f_lin):\n        feat_out = []\n        for i in range(self.multi_head):\n            feat_out.append(self.act(f_lin[i](_feat)))\n        return feat_out\n\n    def _aggregate_attention(self, adj, feat_neigh, feat_self, attention):\n        attention_self = self.att_act(\n            attention[:, : feat_self.shape[1]].mm(feat_self.t())\n        ).squeeze()\n        attention_neigh = self.att_act(\n            attention[:, feat_neigh.shape[1] :].mm(feat_neigh.t())\n        ).squeeze()\n        att_adj = torch.sparse.FloatTensor(\n            adj._indices(),\n            (attention_self[adj._indices()[0]] + attention_neigh[adj._indices()[1]])\n            * adj._values(),\n            torch.Size(adj.shape),\n        )\n        return self._spmm(att_adj, feat_neigh)\n\n    def _batch_norm(self, feat):\n        for i in range(self.order + 1):\n            mean = feat[i].mean(dim=1).unsqueeze(1)\n            var = feat[i].var(dim=1, unbiased=False).unsqueeze(1) + 1e-9\n            feat[i] = (feat[i] - mean) * self.scale[i] * torch.rsqrt(var) \\\n                    + self.offset[i]\n        return feat\n\n    def _compute_gate_value(self, adj, feat, adj_sp_csr):\n        zj = feat.mm(self.weight_pool_gate)\n        neigh_zj = []\n        for i in range(adj.shape[0]):\n            if adj_sp_csr.indptr[i] < adj_sp_csr.indptr[i + 1]:\n                neigh_zj.append(\n                    torch.max(\n                        zj[\n                            adj_sp_csr.indices[\n                                adj_sp_csr.indptr[i] : adj_sp_csr.indptr[i + 1]\n                            ]\n                        ],\n                        0,\n                    )[0].unsqueeze(0)\n                )\n            else:\n                if zj.is_cuda:\n                    neigh_zj.append(torch.zeros(1, self.dim_gate).cuda())\n                else:\n                    neigh_zj.append(torch.zeros(1, self.dim_gate))\n        neigh_zj = torch.cat(neigh_zj, 0)\n        neigh_mean = self._spmm(adj, feat)\n        gate_feat = torch.cat([feat, neigh_zj, neigh_mean], 1)\n        return gate_feat.mm(self.weight_gate)\n\n    def forward(self, inputs):\n        adj_norm, feat_in = inputs\n        feat_in = self.f_dropout(feat_in)\n        adj_norm_cpu = adj_norm.cpu()\n        adj_norm_sp_csr = sp.coo_matrix(\n            (\n                adj_norm_cpu._values().numpy(),\n                (\n                    adj_norm_cpu._indices()[0].numpy(),\n                    adj_norm_cpu._indices()[1].numpy(),\n                ),\n            ),\n            shape=(adj_norm.shape[0], adj_norm.shape[0]),\n        ).tocsr()\n        gate_value = self._compute_gate_value(adj_norm, feat_in, adj_norm_sp_csr)\n        feat_partial = []\n        for i in range(self.order + 1):\n            feat_partial.append(self._f_feat_trans(feat_in, self.f_lin[i]))\n        for i in range(1, self.order + 1):\n            for j in range(i):\n                for k in range(self.multi_head):\n                    feat_partial[i][k] = self._aggregate_attention(\n                        adj_norm,\n                        feat_partial[i][k],\n                        feat_partial[i - j - 1][k],\n                        self.attention[i - 1][k],\n                    )\n                    feat_partial[i][k] *= gate_value[:, k].unsqueeze(1)\n        for i in range(self.order + 1):\n            feat_partial[i] = torch.cat(feat_partial[i], 1)\n        if self.bias == \"norm\":\n            feat_partial = self._batch_norm(feat_partial)\n        if self.aggr == \"mean\":\n            feat_out = feat_partial[0]\n            for i in range(len(feat_partial) - 1):\n                feat_out += feat_partial[i + 1]\n        elif self.aggr == \"concat\":\n            feat_out = torch.cat(feat_partial, 1)\n        else:\n            raise NotImplementedError\n        return adj_norm, feat_out\n\nFile Path: graphsaint/pytorch_version/models.py\nclass GraphSAINT(nn.Module):\n    def __init__(self, num_classes, arch_gcn, train_params, feat_full, label_full, cpu_eval=False):\n        super(GraphSAINT,self).__init__()\n        self.use_cuda = (args_global.gpu >= 0)\n        if cpu_eval:\n            self.use_cuda=False\n        if \"attention\" in arch_gcn:\n            if \"gated_attention\" in arch_gcn:\n                if arch_gcn['gated_attention']:\n                    self.aggregator_cls = layers.GatedAttentionAggregator\n                    self.mulhead = int(arch_gcn['attention'])\n            else:\n                self.aggregator_cls = layers.AttentionAggregator\n                self.mulhead = int(arch_gcn['attention'])\n        else:\n            self.aggregator_cls = layers.HighOrderAggregator\n            self.mulhead = 1\n        self.num_layers = len(arch_gcn['arch'].split('-'))\n        self.weight_decay = train_params['weight_decay']\n        self.dropout = train_params['dropout']\n        self.lr = train_params['lr']\n        self.arch_gcn = arch_gcn\n        self.sigmoid_loss = (arch_gcn['loss'] == 'sigmoid')\n        self.feat_full = torch.from_numpy(feat_full.astype(np.float32))\n        self.label_full = torch.from_numpy(label_full.astype(np.float32))\n        if self.use_cuda:\n            self.feat_full = self.feat_full.cuda()\n            self.label_full = self.label_full.cuda()\n        if not self.sigmoid_loss:\n            self.label_full_cat = torch.from_numpy(label_full.argmax(axis=1).astype(np.int64))\n            if self.use_cuda:\n                self.label_full_cat = self.label_full_cat.cuda()\n        self.num_classes = num_classes\n        _dims, self.order_layer, self.act_layer, self.bias_layer, self.aggr_layer \\\n                        = parse_layer_yml(arch_gcn, self.feat_full.shape[1])\n        self.set_idx_conv()\n        self.set_dims(_dims)\n        self.loss = 0\n        self.opt_op = None\n        self.num_params = 0\n        self.aggregators, num_param = self.get_aggregators()\n        self.num_params += num_param\n        self.conv_layers = nn.Sequential(*self.aggregators)\n        self.classifier = layers.HighOrderAggregator(self.dims_feat[-1], self.num_classes,\\\n                            act='I', order=0, dropout=self.dropout, bias='bias')\n        self.num_params += self.classifier.num_param\n        self.optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)\n\n    def set_dims(self, dims):\n        self.dims_feat = [dims[0]] + [\n            ((self.aggr_layer[l]=='concat') * self.order_layer[l] + 1) * dims[l+1]\n            for l in range(len(dims) - 1)\n        ]\n        self.dims_weight = [(self.dims_feat[l],dims[l+1]) for l in range(len(dims)-1)]\n\n    def set_idx_conv(self):\n        idx_conv = np.where(np.array(self.order_layer) >= 1)[0]\n        idx_conv = list(idx_conv[1:] - 1)\n        idx_conv.append(len(self.order_layer) - 1)\n        _o_arr = np.array(self.order_layer)[idx_conv]\n        if np.prod(np.ediff1d(_o_arr)) == 0:\n            self.idx_conv = idx_conv\n        else:\n            self.idx_conv = list(np.where(np.array(self.order_layer) == 1)[0])\n\n\n    def forward(self, node_subgraph, adj_subgraph):\n        feat_subg = self.feat_full[node_subgraph]\n        label_subg = self.label_full[node_subgraph]\n        label_subg_converted = label_subg if self.sigmoid_loss else self.label_full_cat[node_subgraph]\n        _, emb_subg = self.conv_layers((adj_subgraph, feat_subg))\n        emb_subg_norm = F.normalize(emb_subg, p=2, dim=1)\n        pred_subg = self.classifier((None, emb_subg_norm))[1]\n        return pred_subg, label_subg, label_subg_converted\n\n\n    def _loss(self, preds, labels, norm_loss):\n        if self.sigmoid_loss:\n            norm_loss = norm_loss.unsqueeze(1)\n            return torch.nn.BCEWithLogitsLoss(weight=norm_loss,reduction='sum')(preds, labels)\n        else:\n            _ls = torch.nn.CrossEntropyLoss(reduction='none')(preds, labels)\n            return (norm_loss*_ls).sum()\n\n\n    def get_aggregators(self):\n        num_param = 0\n        aggregators = []\n        for l in range(self.num_layers):\n            aggr = self.aggregator_cls(\n                    *self.dims_weight[l],\n                    dropout=self.dropout,\n                    act=self.act_layer[l],\n                    order=self.order_layer[l],\n                    aggr=self.aggr_layer[l],\n                    bias=self.bias_layer[l],\n                    mulhead=self.mulhead,\n            )\n            num_param += aggr.num_param\n            aggregators.append(aggr)\n        return aggregators, num_param\n\n    def predict(self, preds):\n        return nn.Sigmoid()(preds) if self.sigmoid_loss else F.softmax(preds, dim=1)\n\n\n    def train_step(self, node_subgraph, adj_subgraph, norm_loss_subgraph):\n        self.train()\n        self.optimizer.zero_grad()\n        preds, labels, labels_converted = self(node_subgraph, adj_subgraph)\n        loss = self._loss(preds, labels_converted, norm_loss_subgraph)\n        loss.backward()\n        torch.nn.utils.clip_grad_norm(self.parameters(), 5)\n        self.optimizer.step()\n        return loss, self.predict(preds), labels\n\n    def eval_step(self, node_subgraph, adj_subgraph, norm_loss_subgraph):\n        self.eval()\n        with torch.no_grad():\n            preds,labels,labels_converted = self(node_subgraph, adj_subgraph)\n            loss = self._loss(preds,labels_converted,norm_loss_subgraph)\n        return loss, self.predict(preds), labels\n\nFile Path: graphsaint/open_graph_benchmark/train_ogbn-products.py\n# This file assumes converted OGBN data is available as described in the original project.\n# It uses a PyTorch implementation of GraphSAINT.\nfrom graphsaint.globals import *\nfrom graphsaint.pytorch_version.models import GraphSAINT\nfrom graphsaint.pytorch_version.minibatch import Minibatch\nfrom graphsaint.utils import *\nfrom graphsaint.metric import *\nfrom graphsaint.pytorch_version.utils import *\nfrom  ogb.nodeproppred import Evaluator\n\nimport torch\nimport time\n\nevaluator=Evaluator(name='ogbn-products')\n\ndef evaluate_full_batch(model, minibatch, mode='val'):\n    loss,preds,labels = model.eval_step(*minibatch.one_batch(mode=mode))\n    if mode == 'val':\n        node_target = [minibatch.node_val]\n    elif mode == 'test':\n        node_target = [minibatch.node_test]\n    else:\n        assert mode == 'valtest'\n        node_target = [minibatch.node_val, minibatch.node_test]\n    labels = labels.argmax(dim=-1, keepdim=True)\n    preds = preds.argmax(dim=-1, keepdim=True)\n    f1mic, f1mac = [], []\n    for n in node_target:\n        acc = evaluator.eval({'y_true': labels[n], 'y_pred': preds[n]})['acc']\n        f1mic.append(acc)\n        f1mac.append(acc)\n    f1mic = f1mic[0] if len(f1mic)==1 else f1mic\n    f1mac = f1mac[0] if len(f1mac)==1 else f1mac\n    return loss, f1mic, f1mac\n\n\ndef prepare(train_data,train_params,arch_gcn):\n    adj_full, adj_train, feat_full, class_arr,role = train_data\n    adj_full = adj_full.astype(np.int32)\n    adj_train = adj_train.astype(np.int32)\n    adj_full_norm = adj_norm(adj_full)\n    num_classes = class_arr.shape[1]\n\n    minibatch = Minibatch(adj_full_norm, adj_train, role, train_params)\n    model = GraphSAINT(num_classes, arch_gcn, train_params, feat_full, class_arr)\n    printf(\"TOTAL NUM OF PARAMS = {}\".format(sum(p.numel() for p in model.parameters())), style=\"yellow\")\n    minibatch_eval=Minibatch(adj_full_norm, adj_train, role, train_params, cpu_eval=True)\n    model_eval=GraphSAINT(num_classes, arch_gcn, train_params, feat_full, class_arr, cpu_eval=True)\n    if args_global.gpu >= 0:\n        model = model.cuda()\n    return model, minibatch, minibatch_eval, model_eval\n\n\ndef train(train_phases, model, minibatch, minibatch_eval, model_eval, eval_val_every):\n    if not args_global.cpu_eval:\n        minibatch_eval=minibatch\n    epoch_ph_start = 0\n    f1mic_best, ep_best = 0, -1\n    time_train = 0\n    dir_saver = '{}/pytorch_models'.format(args_global.dir_log)\n    path_saver = '{}/pytorch_models/saved_model_{}.pkl'.format(args_global.dir_log, timestamp)\n    for ip, phase in enumerate(train_phases):\n        printf('START PHASE {:4d}'.format(ip),style='underline')\n        minibatch.set_sampler(phase)\n        num_batches = minibatch.num_training_batches()\n        for e in range(epoch_ph_start, int(phase['end'])):\n            printf('Epoch {:4d}'.format(e),style='bold')\n            minibatch.shuffle()\n            l_loss_tr, l_f1mic_tr, l_f1mac_tr = [], [], []\n            time_train_ep = 0\n            while not minibatch.end():\n                t1 = time.time()\n                loss_train,preds_train,labels_train = model.train_step(*minibatch.one_batch(mode='train'))\n                time_train_ep += time.time() - t1\n                if not minibatch.batch_num % args_global.eval_train_every:\n                    f1_mic, f1_mac = calc_f1(to_numpy(labels_train),to_numpy(preds_train),model.sigmoid_loss)\n                    l_loss_tr.append(loss_train)\n                    l_f1mic_tr.append(f1_mic)\n                    l_f1mac_tr.append(f1_mac)\n            if (e+1)%eval_val_every == 0:\n                if args_global.cpu_eval:\n                    torch.save(model.state_dict(),'tmp.pkl')\n                    model_eval.load_state_dict(torch.load('tmp.pkl',map_location=lambda storage, loc: storage))\n                else:\n                    model_eval = model\n                loss_val, f1mic_val, f1mac_val = evaluate_full_batch(model_eval, minibatch_eval, mode='val')\n                printf(' TRAIN (Ep avg): loss = {:.4f}\\tmic = {:.4f}\\tmac = {:.4f}\\ttrain time = {:.4f} sec'\\\n                        .format(f_mean(l_loss_tr), f_mean(l_f1mic_tr), f_mean(l_f1mac_tr), time_train_ep))\n                printf(' VALIDATION:     loss = {:.4f}\\tmic = {:.4f}\\tmac = {:.4f}'\\\n                        .format(loss_val, f1mic_val, f1mac_val), style='yellow')\n                if f1mic_val > f1mic_best:\n                    f1mic_best, ep_best = f1mic_val, e\n                    if not os.path.exists(dir_saver):\n                        os.makedirs(dir_saver)\n                    printf('  Saving model ...', style='yellow')\n                    torch.save(model.state_dict(), path_saver)\n            time_train += time_train_ep\n        epoch_ph_start = int(phase['end'])\n    printf(\"Optimization Finished!\", style=\"yellow\")\n    if ep_best >= 0:\n        if args_global.cpu_eval:\n            model_eval.load_state_dict(torch.load(path_saver, map_location=lambda storage, loc: storage))\n        else:\n            model.load_state_dict(torch.load(path_saver))\n            model_eval=model\n        printf('  Restoring model ...', style='yellow')\n    loss, f1mic_both, f1mac_both = evaluate_full_batch(model_eval, minibatch_eval, mode='valtest')\n    f1mic_val, f1mic_test = f1mic_both\n    f1mac_val, f1mac_test = f1mac_both\n    printf(\"Full validation (Epoch {:4d}): \\n  F1_Micro = {:.4f}\\tF1_Macro = {:.4f}\"\\\n            .format(ep_best, f1mic_val, f1mac_val), style='red')\n    printf(\"Full test stats: \\n  F1_Micro = {:.4f}\\tF1_Macro = {:.4f}\"\\\n            .format(f1mic_test, f1mac_test), style='red')\n    printf(\"Total training time: {:6.2f} sec\".format(time_train), style='red')\n    return f1mic_test\n\n\nif __name__ == '__main__':\n    log_dir(args_global.train_config, args_global.data_prefix, git_branch, git_rev, timestamp)\n    train_params, train_phases, train_data, arch_gcn = parse_n_prepare(args_global)\n    if 'eval_val_every' not in train_params:\n        train_params['eval_val_every'] = EVAL_VAL_EVERY_EP\n    test_accs = list()\n    for run in range(10):\n        print(f'>>>>>> Run {run:02d}:')\n        torch.cuda.empty_cache()\n        torch.cuda.synchronize()\n        print('memory allocated:', torch.cuda.memory_allocated())\n        print('memory reserved: ', torch.cuda.max_memory_reserved())\n        model, minibatch, minibatch_eval, model_eval = prepare(train_data, train_params, arch_gcn)\n        test_acc = train(train_phases, model, minibatch, minibatch_eval, model_eval,train_params['eval_val_every'])\n        test_accs.append(test_acc)\n    test_acc = torch.tensor(test_accs)\n    print('============================')\n    print(f'Final Test: {test_acc.mean():.4f} \b\b\b\b\b\b\b\b {test_acc.std():.4f}')",
+    "experimental_info": "The GraphSAINT methodology is implemented in PyTorch, focusing on graph sampling-based minibatch training. It uses various samplers (Random Node, Random Edge, Random Walk, Multi-dimensional Random Walk) to extract node-induced subgraphs from the full training graph for each iteration.\n\n**Key Settings and Parameters:**\n\n*   **Graph Samplers:**\n    *   `rw_sampling`: Random Walk sampler with `size_root` (number of walkers) and `size_depth` (number of hops). Subgraph size is estimated as `size_root * size_depth`.\n    *   `edge_sampling`: Selects edges based on pre-computed probabilities proportional to `(1/deg(u) + 1/deg(v))` to minimize variance. Requires `num_edges_subgraph`.\n    *   `mrw_sampling`: Multi-dimensional Random Walk, uses `size_frontier` and `max_deg` for probability clipping.\n    *   `node_sampling`: Selects nodes based on pre-computed probabilities, with `size_subgraph` specifying the number of nodes.\n*   **Normalization:**\n    *   **Aggregator Normalization (`alpha_uv = p_uv / p_v`):** Handled during subgraph processing in `Minibatch.one_batch` by calling `norm_aggr` (Cython) on subgraph edges and `adj_norm` on the adjacency matrix, leveraging `deg_train` (node degrees).\n    *   **Loss Normalization (`lambda_v = |V| * p_v`):** Estimated during a warm-up phase in `Minibatch.set_sampler`. `norm_loss_train` is calculated based on how often nodes appear in sampled subgraphs.\n*   **GNN Architecture:**\n    *   Supports `HighOrderAggregator` (GraphSAGE-mean/GCN-like with customizable `order`), `AttentionAggregator` (GAT-like with multi-head attention), and `GatedAttentionAggregator` (GaAN-like).\n    *   Layers can have `bias` (simple bias), `norm` (manual batch normalization), or `norm-nn` (PyTorch's `BatchNorm1d`).\n    *   Supports `aggr` modes 'mean' or 'concat' for combining features from different hops.\n*   **Training Process:**\n    *   **Parallel Sampling:** Utilizes `NUM_PAR_SAMPLER` CPU cores for parallel sampling, with `SAMPLES_PER_PROC` subgraphs sampled per process.\n    *   **Evaluation:** Full-batch evaluation is performed on validation and test sets. Validation is done every `EVAL_VAL_EVERY_EP` epochs (default 15 in `graphsaint/globals.py` or configurable in `train_params`). Best model is saved based on validation F1-micro score.\n    *   **Loss Function:** `BCEWithLogitsLoss` for multi-label (sigmoid) or `CrossEntropyLoss` for single-label (softmax).\n    *   **Optimizer:** Adam optimizer with `lr` (learning rate) and `weight_decay`.\n    *   **Gradient Clipping:** `torch.nn.utils.clip_grad_norm(self.parameters(), 5)` is applied.\n    *   **Sample Coverage:** `sample_coverage` parameter in `train_params` (e.g., in `minibatch.py`, total sampled nodes must exceed `sample_coverage * node_train.size` for normalization estimation).\n*   **OGBN-products specific settings (from `train_ogbn-products.py`):**\n    *   Uses `ogb.nodeproppred.Evaluator` for evaluation, specifically using 'acc' (accuracy) as the metric.\n    *   The entire training process is repeated 10 times (`for run in range(10):`) to report mean and standard deviation of test accuracy.\n    *   CUDA memory management (`torch.cuda.empty_cache`, `torch.cuda.synchronize`) is performed before each run."
+}
