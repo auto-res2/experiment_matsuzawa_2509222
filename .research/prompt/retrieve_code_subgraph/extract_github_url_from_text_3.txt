@@ -1,0 +1,17 @@
+
+Input:
+# Task
+You carefully read the contents of the “Paper Outline” and select one GitHub link from the “GitHub URLs List” that you think is most relevant to the contents.
+# Constraints
+- Output the index number corresponding to the selected GitHub URL.
+- Be sure to select only one GitHub URL.
+- If there is no related GitHub link, output None.
+# Paper Outline
+GACT abstracts forward propagation as loss and context functions, compressing context tensors to reduce memory. It introduces an unbiased stochastic compressor Q(·) and linearizes the gradient function g(·; θ) using a first-order Taylor expansion (ˆg(Q(h); h,θ)). This linearized gradient (ˆg) is shown to be an unbiased stochastic gradient, with its approximation error bounded by the compression error. The convergence theory (Theorem 1) relies on assumptions about loss function continuity, boundedness, and bounded linearization error (A3) and variance of the linearized gradient (A4). An adaptive algorithm determines per-tensor compression rates (bits/dim) by minimizing compression variance under a total bit budget (Eq. 4). This relies on assumptions that compressed results are element-wise uncorrelated (B1) and compression error variance can be factorized (B2), which are met by a stochastic rounding quantizer. Tensor sensitivity cl(h,θ) is numerically computed by leveraging compressor idempotence (B3) and empirical variance from two gradient evaluations (Algorithm 1). GACT uses low-level PyTorch hooks, efficient CUDA kernels for sensitivity inference and compression, and a per-group quantizer (similar to ActNN but with adaptive tensor-level quantization).
+
+# GitHub URLs List
+['https://github.com/LiuXiaoxuanPKU/GACT-ICML']
+Output:
+{
+    "index": 0
+}
