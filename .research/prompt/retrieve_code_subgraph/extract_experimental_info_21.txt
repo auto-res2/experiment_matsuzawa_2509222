@@ -1,0 +1,980 @@
+
+Input:
+You are a researcher with expertise in engineering in the field of machine learning.
+
+# Instructions
+- The content described in “Repository Content” corresponds to the GitHub repository of the method described in “Method.”
+- Please extract the following two pieces of information from “Repository Content”:
+    - experimental_code：Extract the implementation sections that are directly related to the method described in “Method.”
+    - experimental_info：Extract and output the experimental settings related to the method described in “Method.”
+
+# Method
+The core methodology involves reformulating the sampling variance optimization for GNNs as an adversary bandit problem. Instead of computing intractable optimal sampling distributions, the approach maintains nonparametric estimates of the sampler and updates it iteratively. Two bandit algorithms are proposed: GNN-BS, based on the adversary Multi-Armed Bandit (MAB) setting, where a single neighbor is sampled k times and the policy is updated by EXP3; and GNN-BS.M, based on MAB with multiple plays, which uses an efficient k-combination sampler (DepRound) to select a k-element subset of neighbors once and updates the policy using EXP3.M. The rewards for the bandit problem are defined as the negative derivatives of the effective variance. For attentive GNNs, the issue of unnormalized attention values is handled by defining adjusted feedback attention values using sampled neighbors.
+
+# Repository Content
+File Path: cython_sampler/setup.py
+Content:
+# cython: language_level=3
+from distutils.core import setup, Extension
+from Cython.Build import cythonize
+import numpy
+
+import os
+os.environ["CC"] = "g++"
+os.environ["CXX"] = "g++"
+
+setup(ext_modules = cythonize(["cython_sampler/cython_sampler.pyx","cython_sampler/cython_utils.pyx"]), include_dirs = [numpy.get_include()])
+
+File Path: inits.py
+Content:
+import tensorflow as tf
+import numpy as np
+
+
+def uniform(shape, scale=0.05, name=None):
+    """Uniform init."""
+    initial = tf.random_uniform(shape, minval=-scale, maxval=scale, dtype=tf.float32)
+    return tf.Variable(initial, name=name)
+
+
+def glorot(shape, name=None):
+    """Glorot & Bengio (AISTATS 2010) init."""
+    if len(shape) == 2:
+        init_range = np.sqrt(6.0 / (shape[0] + shape[1]))
+    elif len(shape) == 1:
+        init_range = np.sqrt(6.0 / shape[0])
+    initial = tf.random_uniform(shape, minval=-init_range, maxval=init_range, dtype=tf.float32)
+    return tf.get_variable(initializer=initial, name=name)
+
+
+def zeros(shape, name=None):
+    """All zeros."""
+    initial = tf.zeros(shape, dtype=tf.float32)
+    return tf.Variable(initial, name=name)
+
+
+def ones(shape, name=None):
+    """All ones."""
+    initial = tf.ones(shape, dtype=tf.float32)
+    return tf.Variable(initial, name=name)
+
+File Path: models.py
+Content:
+import numpy as np
+import tensorflow as tf
+
+flags = tf.app.flags
+FLAGS = flags.FLAGS
+
+
+def attention_mechanism(name, v, W_s, W_d, V, cur_embed, left, right, n2n):
+    # a_{i,j} \propto v^\top tanh (W_s (\mu_i + \mu_j))
+    if name == 'linear':
+        t = tf.sparse_tensor_dense_matmul(sp_a=edge, b=cur_embed) # edge \in \R^{m, n}
+        t = tf.matmul(t, W_s) # m by 16
+        t = tf.nn.tanh(t)
+        t = tf.matmul(t, tf.reshape(v, [-1,1])) # m by 1
+        sparse_attention = tf.SparseTensor(n2n.indices, tf.reshape(t, [-1]), n2n.dense_shape)
+        sparse_attention = tf.sparse_softmax(sparse_attention)
+    # a_{i,j} \propto v^\top tanh (W_s |\mu_i - \mu_j|)
+    elif name == 'abs':
+        t = tf.sparse_tensor_dense_matmul(sp_a=edge, b=cur_embed) # edge \in \R^{m, n}
+        t = tf.abs(t)
+        t = tf.matmul(t, W_s) # m by 16
+        t = tf.nn.tanh(t)
+        t = tf.matmul(t, tf.reshape(v, [-1,1])) # m by 1
+        sparse_attention = tf.SparseTensor(n2n.indices, tf.reshape(t, [-1]), n2n.dense_shape)
+        sparse_attention = tf.sparse_softmax(sparse_attention)
+    # a_{i,j} \propto leakyrelu (\mu_i V \mu_j)
+    elif name == 'bilinear':
+        tl = tf.sparse_tensor_dense_matmul(sp_a=left, b=cur_embed) # m by k
+        tl = tf.matmul(tl, V)
+        tr = tf.sparse_tensor_dense_matmul(sp_a=right, b=cur_embed)
+        t = tf.reduce_sum(tf.multiply(tl, tr), 1, keep_dims=True)
+        t = tf.keras.layers.LeakyReLU(t)
+        sparse_attention = tf.SparseTensor(n2n.indices, tf.reshape(t, [-1]), n2n.dense_shape)
+        sparse_attention = tf.sparse_softmax(sparse_attention)
+    # a_{i,j} \propto v^\top tanh (W_s \mu_i + W_d \mu_j)
+    if name == 'generalized_linear':
+        tl = tf.sparse_tensor_dense_matmul(sp_a=left, b=cur_embed) # m by k
+        tl = tf.matmul(tl, W_s)
+        tr = tf.sparse_tensor_dense_matmul(sp_a=right, b=cur_embed)
+        tr = tf.matmul(tr, W_d)
+        t = tf.nn.tanh(tf.add(tl,tr))
+        t = tf.matmul(t, tf.reshape(v, [-1,1]))
+        sparse_attention = tf.SparseTensor(n2n.indices, tf.reshape(t, [-1]), n2n.dense_shape)
+        sparse_attention = tf.sparse_softmax(sparse_attention)
+    else:
+        sys.exit(-1)
+    return sparse_attention
+
+
+def glorot(shape, name=None):
+    """Glorot & Bengio (AISTATS 2010) init."""
+    if len(shape)==2:
+        init_range = np.sqrt(6.0/(shape[0]+shape[1]))
+    elif len(shape)==1:
+        init_range = np.sqrt(6.0/shape[0])
+    initial = tf.random_uniform(shape, minval=-init_range, maxval=init_range, dtype=tf.float32)
+    return tf.Variable(initial, name=name)
+
+
+class Model(object):
+    def __init__(self, **kwargs):
+        allowed_kwargs = {'name', 'logging'}
+        for kwarg in kwargs.keys():
+            assert kwarg in allowed_kwargs, 'Invalid keyword argument: ' + kwarg
+        name = kwargs.get('name')
+        if not name:
+            name = self.__class__.__name__.lower()
+        self.name = name
+
+        logging = kwargs.get('logging', False)
+        self.logging = logging
+
+        self.task_type = None
+        self.vars = {}
+        self.placeholders = {}
+
+        self.label_dim = None
+        self.inputs = None
+        self.layers = []
+        self.activations = []
+        self.outputs = None
+
+        self.sparse_attention_l0 = None
+
+        self.loss = 0
+        self.accuracy = 0
+        self.optimizer = None
+        self.opt_op = None
+
+    def _build(self):
+        raise NotImplementedError
+
+    def build(self):
+        """ Wrapper for _build() """
+        with tf.variable_scope(self.name):
+            self._build()
+
+        # Store model variables for easy access
+        variables = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope=self.name)
+        self.vars = {var.name: var for var in variables}
+
+        # Build metrics
+        self._loss()
+
+        grads_and_vars = self.optimizer.compute_gradients(self.loss)
+        clipped_grads_and_vars = [(tf.clip_by_value(grad, -5.0, 5.0) if grad is not None else None, var)
+                for grad, var in grads_and_vars]
+        self.grad, _ = clipped_grads_and_vars[0]
+        self.opt_op = self.optimizer.apply_gradients(clipped_grads_and_vars)
+
+        #self.opt_op = self.optimizer.minimize(self.loss)
+
+    def _loss(self):
+        raise NotImplementedError
+
+    def save(self, sess=None):
+        if not sess:
+            raise AttributeError("TensorFlow session not provided.")
+        saver = tf.train.Saver(self.vars)
+        save_path = saver.save(sess, "tmp/%s.ckpt" % self.name)
+        print("Model saved in file: %s" % save_path)
+
+    def load(self, sess=None):
+        if not sess:
+            raise AttributeError("TensorFlow session not provided.")
+        saver = tf.train.Saver(self.vars)
+        save_path = "tmp/%s.ckpt" % self.name
+        saver.restore(sess, save_path)
+        print("Model restored from file: %s" % save_path)
+
+
+class GeniePath(Model):
+    def __init__(self, task_type, placeholders, input_dim, label_dim, **kwargs):
+        super(GeniePath, self).__init__(**kwargs)
+
+        self.inputs = placeholders['features']
+        assert task_type in ["exclusive-label", "multi-label"], "Unknown task type!"
+        self.task_type = task_type
+        self.input_dim = input_dim
+        self.label_dim = label_dim
+        self.placeholders = placeholders
+
+        self.optimizer = tf.train.AdamOptimizer(learning_rate=FLAGS.learning_rate)
+
+        self.build()
+
+    def _loss(self):
+        # Weight decay loss
+        #for i in range(len(self.layers)):
+        #    for var in self.layers[i].vars.values():
+        #        self.loss += FLAGS.weight_decay * tf.nn.l2_loss(var)
+        l2_loss = 0
+        for i in range(2):
+            l2_loss += tf.nn.l2_loss(self.vars_wn[i])
+            l2_loss += tf.nn.l2_loss(self.vars_bn[i])
+            l2_loss += tf.nn.l2_loss(self.vars_ws[i])
+            l2_loss += tf.nn.l2_loss(self.vars_wd[i])
+            l2_loss += tf.nn.l2_loss(self.vars_v[i])
+            l2_loss += tf.nn.l2_loss(self.vars_V[i])
+            l2_loss += tf.nn.l2_loss(self.vars_wi[i])
+            l2_loss += tf.nn.l2_loss(self.vars_wf[i])
+            l2_loss += tf.nn.l2_loss(self.vars_wo[i])
+            l2_loss += tf.nn.l2_loss(self.vars_wc[i])
+            l2_loss += tf.nn.l2_loss(self.vars_bc[i])
+            l2_loss += tf.nn.l2_loss(self.vars_bo[i])
+            l2_loss += tf.nn.l2_loss(self.vars_bf[i])
+            l2_loss += tf.nn.l2_loss(self.vars_bi[i])
+        l2_loss += tf.nn.l2_loss(self.W_x)
+        l2_loss += tf.nn.l2_loss(self.b_x)
+        l2_loss += tf.nn.l2_loss(self.v_o)
+        l2_loss += tf.nn.l2_loss(self.ws_o)
+        l2_loss += tf.nn.l2_loss(self.wd_o)
+        l2_loss += tf.nn.l2_loss(self.V_o)
+        l2_loss += tf.nn.l2_loss(self.wn_o)
+        l2_loss += tf.nn.l2_loss(self.b_o)
+        self.loss += FLAGS.weight_decay * l2_loss
+
+        # Cross entropy error
+        if self.task_type == "exclusive-label":
+            self.loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(
+                        labels=self.placeholders['labels'],
+                        logits=self.outputs))
+        else:  # multi-label
+            self.loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
+                        labels=self.placeholders['labels'],
+                        logits=self.outputs))
+
+    def _build(self):
+        # placeholder
+        self.n2n=self.placeholders['support']
+        self.node_feat=self.placeholders['features']
+        self.node_select=self.placeholders['node_select']
+        self.left=self.placeholders['left']
+        self.right=self.placeholders['right']
+        self.n_nd=self.placeholders['n_nd']
+
+        # parameters
+        hidden_dim = FLAGS.hidden1
+        input_dim=self.input_dim
+        label_dim = self.label_dim
+        self.vars_wn=[]
+        self.vars_bn=[]
+        self.vars_ws=[]
+        self.vars_wd=[]
+        self.vars_v=[]
+        self.vars_V=[]
+        self.vars_wi=[]
+        self.vars_wf=[]
+        self.vars_wo=[]
+        self.vars_wc=[]
+        self.vars_bc=[]
+        self.vars_bo=[]
+        self.vars_bf=[]
+        self.vars_bi=[]
+        collector=[]
+        for i in range(2):
+            self.vars_wn.append(glorot([hidden_dim, hidden_dim], 'W_n_%d'%i))
+            self.vars_bn.append(tf.Variable(tf.zeros([hidden_dim], dtype=tf.float32), name='b_n_%d'%i))
+            self.vars_ws.append(glorot([hidden_dim, hidden_dim], 'W_s_%d'%i))
+            self.vars_wd.append(glorot([hidden_dim, hidden_dim], 'W_d_%d'%i))
+            self.vars_v.append(glorot([hidden_dim], 'v_%d'%i))
+            self.vars_V.append(glorot([hidden_dim, hidden_dim], 'V_%d'%i))
+
+            self.vars_wi.append(glorot([hidden_dim*2, hidden_dim], 'W_i_%d'%i))
+            self.vars_wf.append(glorot([hidden_dim*2, hidden_dim], 'W_f_%d'%i))
+            self.vars_wo.append(glorot([hidden_dim*2, hidden_dim], 'W_o_%d'%i))
+            self.vars_wc.append(glorot([hidden_dim*2, hidden_dim], 'W_c_%d'%i))
+
+            self.vars_bc.append(tf.Variable(tf.zeros([hidden_dim], dtype=tf.float32), name='b_c_%d'%i))
+            self.vars_bo.append(tf.Variable(tf.zeros([hidden_dim], dtype=tf.float32), name='b_o_%d'%i))
+            self.vars_bf.append(tf.Variable(tf.zeros([hidden_dim], dtype=tf.float32), name='b_f_%d'%i))
+            self.vars_bi.append(tf.Variable(tf.zeros([hidden_dim], dtype=tf.float32), name='b_i_%d'%i))
+        self.W_x = glorot([input_dim, hidden_dim], 'W_x')
+        self.b_x = tf.Variable(tf.zeros([hidden_dim], dtype=tf.float32), name='b_x')
+        self.v_o = glorot([hidden_dim], 'v_o')
+        self.ws_o = glorot([hidden_dim, hidden_dim], 'W_s_o')
+        self.wd_o = glorot([hidden_dim, hidden_dim], 'W_d_o')
+        self.V_o = glorot([hidden_dim, hidden_dim], 'V_o')
+        self.wn_o = glorot([hidden_dim, label_dim], 'W_n_o')
+        self.b_o = tf.Variable(tf.zeros([label_dim], dtype=tf.float32), name='b_o')
+
+        # inference
+        #self.node_feat = tf.nn.dropout(self.node_feat, rate=1-self.keep_prob)
+        node_embed = tf.matmul(self.node_feat, self.W_x) + self.b_x
+        cur_embed = node_embed
+        C = tf.zeros([self.n_nd, hidden_dim], tf.float32)
+
+        for i in range(2):
+            cur_embed = tf.nn.dropout(cur_embed, rate=FLAGS.dropout)
+
+            # build sparse attention matrix a_{i,j}
+            sparse_attention = attention_mechanism(
+                    "generalized_linear", self.vars_v[i], self.vars_ws[i], self.vars_wd[i],
+                    self.vars_V[i], cur_embed, self.left, self.right, self.n2n)
+            if i == 0:
+                self.sparse_attention_l0 = sparse_attention.values
+
+            # propagation
+            n2npool = tf.sparse_tensor_dense_matmul(sp_a=sparse_attention, b=cur_embed)
+            node_linear = tf.matmul(n2npool, self.vars_wn[i]) + self.vars_bn[i]
+
+            if FLAGS.residual == 1:
+                merged_linear = tf.add(node_linear, node_embed)
+            else:
+                merged_linear = node_linear
+
+            cur_embed = tf.nn.tanh(merged_linear)
+            #cur_embed = tf.nn.dropout(cur_embed, rate=1-self.keep_prob)
+            collector.append(cur_embed)
+
+        for i in range(len(collector)):
+            input_gate  = tf.nn.sigmoid(tf.matmul(tf.concat([collector[i], node_embed], 1), self.vars_wi[i])+self.vars_bi[i])
+            forget_gate = tf.nn.sigmoid(tf.matmul(tf.concat([collector[i], node_embed], 1), self.vars_wf[i])+self.vars_bf[i])
+            output_gate = tf.nn.sigmoid(tf.matmul(tf.concat([collector[i], node_embed], 1), self.vars_wo[i])+self.vars_bo[i])
+            C_update = tf.nn.tanh(tf.matmul(tf.concat([collector[i], node_embed], 1), self.vars_wc[i])+self.vars_bc[i])
+            C = tf.add(tf.multiply(forget_gate, C), tf.multiply(input_gate, C_update))
+            node_embed = tf.multiply(output_gate, tf.nn.tanh(C))
+        node_embed = tf.matmul(node_embed, self.wn_o)+self.b_o
+        self.outputs = tf.sparse_tensor_dense_matmul(sp_a=self.node_select, b=node_embed)
+
+
+class GAT(Model):
+    def __init__(self, task_type, placeholders, input_dim, label_dim, **kwargs):
+        super(GAT, self).__init__(**kwargs)
+
+        self.inputs = placeholders['features']
+        assert task_type in ["exclusive-label", "multi-label"], "Unknown task type!"
+        self.task_type = task_type
+        self.input_dim = input_dim
+        self.label_dim = label_dim
+        self.placeholders = placeholders
+
+        self.optimizer = tf.train.AdamOptimizer(learning_rate=FLAGS.learning_rate)
+
+        self.build()
+
+    def _loss(self):
+        # Weight decay loss
+        #for i in range(len(self.layers)):
+        #    for var in self.layers[i].vars.values():
+        #        self.loss += FLAGS.weight_decay * tf.nn.l2_loss(var)
+
+        for i in range(2):
+            self.loss += FLAGS.weight_decay * tf.nn.l2_loss(self.vars_wn[i])
+            self.loss += FLAGS.weight_decay * tf.nn.l2_loss(self.vars_bn[i])
+            self.loss += FLAGS.weight_decay * tf.nn.l2_loss(self.vars_ws[i])
+            self.loss += FLAGS.weight_decay * tf.nn.l2_loss(self.vars_wd[i])
+            self.loss += FLAGS.weight_decay * tf.nn.l2_loss(self.vars_v[i])
+            self.loss += FLAGS.weight_decay * tf.nn.l2_loss(self.vars_V[i])
+        self.loss += FLAGS.weight_decay * tf.nn.l2_loss(self.W_x)
+        self.loss += FLAGS.weight_decay * tf.nn.l2_loss(self.b_x)
+        self.loss += FLAGS.weight_decay * tf.nn.l2_loss(self.wn_o)
+        self.loss += FLAGS.weight_decay * tf.nn.l2_loss(self.b_o)
+
+        # Cross entropy error
+        if self.task_type == "exclusive-label":
+            self.loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(
+                        labels=self.placeholders['labels'],
+                        logits=self.outputs))
+        else:  # multi-label
+            self.loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
+                        labels=self.placeholders['labels'],
+                        logits=self.outputs))
+
+    def _build(self):
+        # placeholder
+        self.n2n=self.placeholders['support']
+        self.node_feat=self.placeholders['features']
+        self.node_select=self.placeholders['node_select']
+        self.left=self.placeholders['left']
+        self.right=self.placeholders['right']
+        self.n_nd=self.placeholders['n_nd']
+
+        # parameters
+        hidden_dim = FLAGS.hidden1
+        input_dim=self.input_dim
+        label_dim = self.label_dim
+        self.vars_wn=[]
+        self.vars_bn=[]
+        self.vars_ws=[]
+        self.vars_wd=[]
+        self.vars_v=[]
+        self.vars_V=[]
+        for i in range(2):
+            if i == 0:
+                self.vars_wn.append(glorot([hidden_dim, hidden_dim], 'W_n_%d'%i))
+                self.vars_bn.append(tf.Variable(tf.zeros([hidden_dim], dtype=tf.float32), name='b_n_%d'%i))
+                self.vars_ws.append(glorot([hidden_dim, hidden_dim], 'W_s_%d'%i))
+                self.vars_wd.append(glorot([hidden_dim, hidden_dim], 'W_d_%d'%i))
+                self.vars_v.append(glorot([hidden_dim], 'v_%d'%i))
+                self.vars_V.append(glorot([hidden_dim, hidden_dim], 'V_%d'%i))
+            else:
+                self.vars_wn.append(glorot([hidden_dim, hidden_dim], 'W_n_%d'%i))
+                self.vars_bn.append(tf.Variable(tf.zeros([hidden_dim], dtype=tf.float32), name='b_n_%d'%i))
+                self.vars_ws.append(glorot([hidden_dim, hidden_dim], 'W_s_%d'%i))
+                self.vars_wd.append(glorot([hidden_dim, hidden_dim], 'W_d_%d'%i))
+                self.vars_v.append(glorot([hidden_dim], 'v_%d'%i))
+                self.vars_V.append(glorot([hidden_dim, hidden_dim], 'V_%d'%i))
+
+        self.W_x = glorot([input_dim, hidden_dim], 'W_x')
+        self.b_x = tf.Variable(tf.zeros([hidden_dim], dtype=tf.float32), name='b_x')
+        self.wn_o = glorot([hidden_dim, label_dim], 'W_n_o')
+        self.b_o = tf.Variable(tf.zeros([label_dim], dtype=tf.float32), name='b_o')
+
+        # inference
+        #self.node_feat = tf.nn.dropout(self.node_feat, rate=1-self.keep_prob)
+        node_embed = tf.matmul(self.node_feat, self.W_x)+self.b_x
+        #node_embed = self.node_feat
+        cur_embed = node_embed
+
+        bp = 2
+        for i in range(bp):
+            cur_embed = tf.nn.dropout(cur_embed, rate=FLAGS.dropout)
+
+            # build sparse attention matrix a_{i,j}
+            sparse_attention = attention_mechanism(
+                    "generalized_linear", self.vars_v[i], self.vars_ws[i], self.vars_wd[i],
+                    self.vars_V[i], cur_embed, self.left, self.right, self.n2n)
+            if i == 0:
+                self.sparse_attention_l0 = sparse_attention.values
+
+            # propagation
+            n2npool = tf.sparse_tensor_dense_matmul(sp_a=sparse_attention, b=cur_embed)
+            node_linear = tf.matmul(n2npool, self.vars_wn[i])+self.vars_bn[i]
+
+            if FLAGS.residual == 1:
+                merged_linear = tf.add(node_linear, node_embed)
+            else:
+                merged_linear = node_linear
+
+            cur_embed = tf.nn.tanh(merged_linear)
+            #cur_embed = tf.nn.dropout(cur_embed, rate=1-self.keep_prob)
+
+        node_embed = tf.matmul(cur_embed, self.wn_o)+self.b_o
+        self.outputs = tf.sparse_tensor_dense_matmul(sp_a=self.node_select, b=node_embed)
+
+File Path: train.py
+Content:
+from __future__ import division
+from __future__ import print_function
+
+import os
+os.environ['KMP_WARNINGS'] = '0'
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+import time
+import math
+import copy
+import itertools
+import tensorflow as tf
+import scipy.sparse as sp
+
+from utils import *
+from models import GeniePath
+from cython_sampler import BanditMPSampler
+from scipy.sparse.linalg import norm as sparsenorm
+from ogb.nodeproppred import Evaluator
+
+epsilon = 1e-6
+
+# Settings
+flags = tf.app.flags
+FLAGS = flags.FLAGS
+flags.DEFINE_string('dataset', 'cora', 'Dataset string.')
+flags.DEFINE_float('learning_rate', 0.001, 'Initial learning rate.')
+flags.DEFINE_integer('epochs', 3, 'Number of epochs to train.')
+flags.DEFINE_integer('hidden1', 64, 'Number of units in hidden layer 1.')
+flags.DEFINE_float('dropout', 0.0, 'Dropout rate (1 - keep probability).')
+flags.DEFINE_float('weight_decay', 5e-4, 'Weight for L2 loss on embedding matrix.')
+flags.DEFINE_integer('early_stopping', 30, 'Tolerance for early stopping (# of epochs).')
+flags.DEFINE_integer('neighbor_limit', 10, 'Maximum Chebyshev polynomial degree.')
+flags.DEFINE_integer('batchsize', 256, 'Batch size.')
+flags.DEFINE_integer('residual', 1, 'Residual.')
+flags.DEFINE_float('eta', 0.4, 'Eta.')
+flags.DEFINE_float('delta', 0.01, 'Delta.')
+flags.DEFINE_float('max_reward', 1.0, 'Max reward.')
+flags.DEFINE_integer('num_proc', 12, 'Number of process.')
+
+
+def iterate_minibatches(inputs, batchsize, shuffle=False):
+    assert inputs is not None
+    num_samples = inputs[-1].shape[0]
+    nodes = inputs[0]
+    labels = inputs[1]
+    if shuffle:
+        indices = np.arange(num_samples)
+        np.random.shuffle(indices)
+    if num_samples <= batchsize:
+        yield np.array(nodes, np.int32), labels
+    else:
+        num_batch = int(math.ceil(float(num_samples) / batchsize))
+        for idx in range(num_batch):
+            if shuffle:
+                if (idx+1)*batchsize < num_samples:
+                    excerpt = indices[idx*batchsize:(idx+1)*batchsize]
+                else:
+                    excerpt = indices[idx*batchsize:]
+                    excerpt = np.concatenate((excerpt,indices[:(idx+1)*batchsize-num_samples]), axis=0)
+            else:
+                excerpt = slice(start_idx, start_idx + batchsize)
+            yield np.array(nodes[excerpt], np.int32), labels[excerpt]
+
+
+def gen_subgraph(sampler, selected_nodes, adj, num_layer=2, neighbor_limit=10):
+    edges = sampler.sample_graph(selected_nodes)
+    edges = sorted(edges, key=lambda element: (element[0], element[1]))
+
+    expand_list = set()
+    for (src, dst) in edges:
+        expand_list.add(src)
+        expand_list.add(dst)
+    for nod in selected_nodes:
+        expand_list.add(nod)
+    expand_list = list(expand_list)
+    expand_list = sorted(expand_list)
+
+    node_map = {}
+    inverse_node_map = {}
+    m_id = 0
+    for nod in expand_list:
+        node_map[nod] = m_id
+        inverse_node_map[m_id] = nod
+        m_id += 1
+
+    src_list = []
+    dst_list = []
+    n2n_indices_batch=[]
+    n2n_values_batch=[]
+    
+    sample_degree = {}
+    for src in set([e[0] for e in edges]):
+        sample_degree[src] = 0
+    for (src, dst) in edges:
+        sample_degree[src] += 1
+
+    for (src, dst) in edges:
+        n2n_indices_batch.append([node_map[src], node_map[dst]])
+        src_list.append(src)
+        dst_list.append(dst)
+        n2n_values_batch.append(1.)
+    n2n_indices_batch = np.array(n2n_indices_batch)
+    n2n_values_batch = np.array(n2n_values_batch)
+
+    left_indices_batch = [None]*len(n2n_indices_batch)
+    left_values_batch = np.ones(len(n2n_indices_batch))
+    right_indices_batch = [None]*len(n2n_indices_batch)
+    right_values_batch = np.ones(len(n2n_indices_batch))
+    ii = 0
+    for n1, n2 in n2n_indices_batch:
+        left_indices_batch[ii] = [ii, n1]
+        right_indices_batch[ii] = [ii, n2]
+        ii += 1
+
+    node_indices_batch = []
+    node_values_batch = np.ones(len(selected_nodes))
+    ii = 0
+    for nod in selected_nodes:
+        node_indices_batch.append([ii, node_map[nod]])
+        ii += 1
+    node_indices_batch = np.array(node_indices_batch)
+    node_values_batch = np.array(node_values_batch)
+
+    n2n = tf.SparseTensorValue(n2n_indices_batch, n2n_values_batch, [m_id, m_id])
+    left = tf.SparseTensorValue(left_indices_batch, left_values_batch, [len(left_indices_batch), m_id])
+    right = tf.SparseTensorValue(right_indices_batch, right_values_batch, [len(right_indices_batch), m_id])
+    node_select = tf.SparseTensorValue(node_indices_batch, node_values_batch, [len(node_indices_batch), m_id])
+    return expand_list, n2n, left, right, node_select, src_list, dst_list, node_map
+
+
+def gen_fullgraph(selected_nodes, adj, n2n_values_batch):
+    adj_coo = adj.tocoo()
+    m_id = adj.shape[0]
+
+    n_edges = len(adj_coo.row)
+    n2n_indices_batch=np.concatenate(
+            [adj_coo.row[:,np.newaxis], adj_coo.col[:,np.newaxis]], axis=1)
+
+    left_indices_batch = np.concatenate(
+            [np.arange(n_edges)[:,np.newaxis],
+             adj_coo.row[:,np.newaxis]], axis=1)
+    left_values_batch = np.ones(len(n2n_indices_batch))
+    right_indices_batch = np.concatenate(
+            [np.arange(n_edges)[:,np.newaxis],
+             adj_coo.col[:,np.newaxis]], axis=1)
+    right_values_batch = np.ones(len(n2n_indices_batch))
+
+    node_indices_batch = np.concatenate(
+            [np.arange(len(selected_nodes))[:,np.newaxis],
+             selected_nodes[:,np.newaxis]], axis=1)
+    node_values_batch = np.ones(len(selected_nodes))
+
+    n2n = tf.SparseTensorValue(n2n_indices_batch, n2n_values_batch, [m_id, m_id])
+    left = tf.SparseTensorValue(left_indices_batch, left_values_batch, [len(left_indices_batch), m_id])
+    right = tf.SparseTensorValue(right_indices_batch, right_values_batch, [len(right_indices_batch), m_id])
+    node_select = tf.SparseTensorValue(node_indices_batch, node_values_batch, [len(node_indices_batch), m_id])
+    return n2n, left, right, node_select
+
+
+def construct_feed_dict(n_nd, features, node_select, support, left, right, labels, placeholders):
+    """Construct feed dictionary."""
+    feed_dict = dict()
+    feed_dict.update({placeholders['features']: features})
+    feed_dict.update({placeholders['node_select']: node_select})
+    feed_dict.update({placeholders['labels']: labels})
+    feed_dict.update({placeholders['support']: support})
+    feed_dict.update({placeholders['left']: left})
+    feed_dict.update({placeholders['right']: right})
+    feed_dict.update({placeholders['n_nd']: n_nd})
+    return feed_dict
+
+
+def convert_support(support, left, right):
+    indices = []
+    for i in range(len(support[0])):
+        indices.append([left[support[0][i][0]], right[support[0][i][1]]])
+    return (np.array(indices), support[1], support[2])
+
+
+def main():
+    data_name = "_".join(FLAGS.dataset.split("-"))
+    adj_full, features, train_nodes, y_train, \
+        valid_nodes, y_valid, test_nodes, y_test = load_data(FLAGS.dataset)
+    print("Finish loading data.")
+
+    # adj_train equals adj_full in ogb dataset
+    adj_train = adj_full
+
+    evaluator = Evaluator(name = FLAGS.dataset)
+    eval_key = None
+    if FLAGS.dataset == "ogbn-proteins":
+        eval_key = "rocauc"
+    elif FLAGS.dataset == "ogbn-products":
+        eval_key = "acc"
+
+    sampler = BanditMPSampler()
+    sampler.init(adj_train)
+    print("Finish init sampler.")
+
+    n2n_values = np.ones(adj_full.count_nonzero(), dtype=np.float32)
+
+    feature_dim = features.shape[-1]
+    label_dim = y_train.shape[-1]
+    num_supports = 2
+    numNode = adj_full.shape[0]
+
+    # Define placeholders
+    placeholders = {
+        'support': tf.sparse_placeholder(tf.float32),
+        'features': tf.placeholder(tf.float32, shape=(None,feature_dim)),
+        'node_select': tf.sparse_placeholder(tf.float32),
+        'labels': tf.placeholder(tf.float32, shape=(None,label_dim)),
+        'dropout': tf.placeholder_with_default(0., shape=()),
+        'left': tf.sparse_placeholder(tf.float32),
+        'right': tf.sparse_placeholder(tf.float32),
+        'n_nd': tf.placeholder(tf.int32, shape=[]),
+    }
+
+    # Define task type
+    task_type_dict = {
+        "ogbn-proteins": "multi-label",
+        "ogbn-products": "exclusive-label",
+    }
+    task_type = task_type_dict[FLAGS.dataset]
+
+    # Create model
+    model = GeniePath(task_type, placeholders, input_dim=features.shape[-1], label_dim=label_dim)
+
+    # Initialize session
+    sess = tf.Session()
+
+    # Construct val feed dictionary
+    support, left, right, node_select = gen_fullgraph(valid_nodes, adj_full, n2n_values)
+    val_feed_dict = construct_feed_dict(
+            adj_full.shape[0], features, node_select, support, left, right, y_valid, placeholders)
+    val_feed_dict.update({placeholders['dropout']: 0.})
+
+    # Construct test feed dictionary
+    support, left, right, node_select = gen_fullgraph(test_nodes, adj_full, n2n_values)
+    test_feed_dict = construct_feed_dict(
+            adj_full.shape[0], features, node_select, support, left, right, y_test, placeholders)
+    test_feed_dict.update({placeholders['dropout']: 0.})
+
+    # Define model evaluation function
+    def evaluate(labels, feed_dict):
+        outs = sess.run([model.outputs], feed_dict=feed_dict)
+        preds = outs[0].tolist()
+        eval_true = np.array(labels)
+        eval_pred = np.array(preds)
+
+        # evaluate
+        if task_type == "exclusive-label":
+            eval_true = np.argmax(eval_true, axis=1).reshape([-1,1])
+            eval_pred = np.argmax(eval_pred, axis=1).reshape([-1,1])
+        eval_res = evaluator.eval({"y_true": eval_true, "y_pred": eval_pred})[eval_key]
+
+        return eval_res
+
+    # Init variables
+    sess.run(tf.global_variables_initializer())
+    saver = tf.train.Saver()
+    if not os.path.exists("./save_models"):
+        os.mkdir("./save_models")
+
+    # Save initial model
+    initial_version = 0
+    if not os.path.exists("./save_models/%s" % FLAGS.dataset):
+        os.mkdir("./save_models/%s" % FLAGS.dataset)
+    saver.save(sess, "./save_models/{}/{}.ckpt".format(
+                FLAGS.dataset, initial_version))
+
+    # run 10 times
+    results = []
+    for rnd in range(1,11):
+        # reset model parameters
+        saver.restore(sess, "./save_models/{}/{}.ckpt".format(
+                      FLAGS.dataset, initial_version))
+
+        train_true = []
+        train_pred = []
+
+        best_va = 0
+
+        # Train model
+        for epoch in range(FLAGS.epochs):
+            n = 0
+            train_losses = []
+            tic = time.time()
+            for batch in iterate_minibatches(
+                    [train_nodes, y_train], batchsize=FLAGS.batchsize, shuffle=True):
+                batch_nodes, y_batch = batch
+
+                subgraph_nodes, support, left, right, node_select, src_list, dst_list, node_map = \
+                    gen_subgraph(sampler, batch_nodes, adj_train, neighbor_limit=FLAGS.neighbor_limit)
+
+                features_inputs = features[subgraph_nodes, :]
+
+                # Construct feed dictionary
+                feed_dict = construct_feed_dict(
+                        len(node_map), features_inputs, node_select, support, left, right, y_batch, placeholders)
+                feed_dict.update({placeholders['dropout']: FLAGS.dropout})
+
+                # Training step
+                outs = sess.run([model.opt_op, model.loss, model.sparse_attention_l0, model.outputs], feed_dict=feed_dict)
+                train_losses.append(outs[1])
+
+                # Update sample probs
+                sampler.update(np.array(src_list, dtype=np.int32), np.array(dst_list, dtype=np.int32), outs[2])
+
+                train_true.extend(y_batch.tolist())
+                train_pred.extend(outs[3].tolist())
+
+            # compute Train eval
+            if task_type == "exclusive-label":
+                train_true = np.argmax(train_true, axis=1).reshape([-1,1])
+                train_pred = np.argmax(train_pred, axis=1).reshape([-1,1])
+            eval_tr = evaluator.eval({"y_true": np.array(train_true), "y_pred": np.array(train_pred)})[eval_key]
+            train_true = []
+            train_pred = []
+
+            # Valid
+            eval_va = evaluate(y_valid, val_feed_dict)
+            print("Round:", '%02d' % rnd,
+                  "Epoch:", '%04d' % (epoch + 1),
+                  "loss=", "{:.4f}".format(np.mean(train_losses)),
+                  "{}_tr=".format(eval_key), "{:.4f}".format(eval_tr),
+                  "{}_va=".format(eval_key), "{:.4f}".format(eval_va))
+
+            if eval_va > best_va:
+                best_va = eval_va
+                if not os.path.exists("./save_models/%s" % FLAGS.dataset):
+                    os.mkdir("./save_models/%s" % FLAGS.dataset)
+                saver.save(sess, "./save_models/{}/{}.ckpt".format(
+                            FLAGS.dataset, rnd))
+
+        # Testing
+        saver.restore(sess, "./save_models/{}/{}.ckpt".format(
+                      FLAGS.dataset, rnd))
+        eval_te = evaluate(y_test, test_feed_dict)
+        print("Round:", '%02d' % rnd,
+              "Test=", "{:.4f}".format(eval_te))
+        results.append(eval_te)
+
+    # print result
+    results = np.array(results)
+    print('Final Test: {:.4f} ± {:.4f}'.format(results.mean(), results.std()))
+
+
+if __name__=="__main__":
+    print("DATASET:", FLAGS.dataset)
+    main()
+
+File Path: utils.py
+Content:
+import numpy as np
+import scipy.sparse as sp
+import tensorflow as tf
+from scipy.sparse.linalg.eigen.arpack import eigsh
+import os
+import sys
+import time
+import json
+from tqdm import tqdm
+from sklearn.preprocessing import StandardScaler
+from scipy.sparse.linalg import norm as sparsenorm
+from scipy.linalg import qr
+from sklearn.metrics import f1_score
+from ogb.nodeproppred import NodePropPredDataset
+
+
+def parse_index_file(filename):
+    """Parse index file."""
+    index = []
+    for line in open(filename):
+        index.append(int(line.strip()))
+    return index
+
+
+def sample_mask(idx, l):
+    """Create mask."""
+    mask = np.zeros(l)
+    mask[idx] = 1
+    return np.array(mask, dtype=np.bool)
+
+
+def glorot(shape, name=None):
+    """Glorot & Bengio (AISTATS 2010) init."""
+    if len(shape) == 2:
+        init_range = np.sqrt(6.0 / (shape[0] + shape[1]))
+    elif len(shape) == 1:
+        init_range = np.sqrt(6.0 / shape[0])
+    initial = tf.random_uniform(shape, minval=-init_range, maxval=init_range, dtype=tf.float32)
+    return tf.get_variable(initializer=initial, name=name)
+
+
+def calc_f1(task_type, y_true, y_pred):
+    if task_type == "multi-label":
+        #y_pred[y_pred > 0.5] = 1
+        #y_pred[y_pred <= 0.5] = 0
+        y_pred[y_pred > 0.] = 1
+        y_pred[y_pred <= 0.] = 0
+        return f1_score(y_true, y_pred, average="micro")
+    else:
+        y_pred = np.argmax(y_pred, 1)
+        y_true = np.argmax(y_true, 1)
+        f1_micro = f1_score(y_true, y_pred, average="micro")
+        return f1_micro
+
+
+def accuracy(y_true, y_pred):
+    y_pred = np.argmax(y_pred, 1)
+    y_true = np.argmax(y_true, 1)
+    return np.sum(y_pred == y_true) / float(len(y_true))
+
+
+def preprocess(name, root, dataset):
+    splitted_idx = dataset.get_idx_split()
+    graph = dataset[0][0]
+    labels = dataset[0][1]
+
+    # create gnn_bs path
+    dir_gnn_bs = os.path.join(root, "gnn_bs")
+    os.mkdir(dir_gnn_bs)
+
+    num_node = len(graph['node_feat'])
+    edge_index = graph['edge_index']
+    edge_feat = graph['edge_feat']
+    num_edge = len(edge_index[0])
+    feature_dim = len(graph['node_feat'][0])
+    train_indices = splitted_idx['train']
+
+    # add self-loop edges
+    edge_index_list = []
+    edge_index_list.append(edge_index[0].tolist())
+    edge_index_list.append(edge_index[1].tolist())
+    for node in range(num_node):
+        edge_index_list[0].append(node)
+        edge_index_list[1].append(node)
+        num_edge += 1
+
+    # adj_full
+    adj_full = sp.coo_matrix((np.ones(num_edge), (edge_index_list[0], edge_index_list[1])),
+                             shape=(num_node, num_node))
+    sp.save_npz("{}/adj_full.npz".format(dir_gnn_bs), sp.csr_matrix(adj_full))
+
+    # node feats
+    node_feat = None
+    if name == "ogbn-proteins":
+        # average edge feats to get node feats
+        node_feat_list = []
+        adj_sum = adj_full.sum(axis=1)
+        print("generate node feats...")
+        for i in tqdm(range(edge_feat.shape[1])):
+            edge_feat_i = sp.coo_matrix((edge_feat[:,i], (edge_index[0], edge_index[1])),
+                                        shape=(num_node, num_node))
+            node_feat_list.append(edge_feat_i.sum(axis=1)/adj_sum)
+        node_feat = np.concatenate(node_feat_list, axis=1)
+    elif name == "ogbn-products":
+        node_feat = graph['node_feat']
+    else:
+        print("unknown data name: {}".format(name))
+        sys.exit(0)
+
+    # labels
+    if name == "ogbn-products":
+        label_idx = labels.reshape([-1])
+        labels = np.zeros((label_idx.size, label_idx.max()+1))
+        labels[np.arange(label_idx.size), label_idx] = 1
+    np.save(open("{}/labels.npy".format(dir_gnn_bs), "wb"), labels)
+
+    # feats
+    np.save(open("{}/feats.npy".format(dir_gnn_bs), "wb"), node_feat)
+
+    # splitted_idx
+    np.save(open("{}/splitted_idx.npy".format(dir_gnn_bs), "wb"), splitted_idx)
+
+def load_data(name):
+    dir_name = "_".join(name.split("-"))
+    root = os.path.join("dataset", dir_name)
+    dir_gnn_bs = os.path.join(root, "gnn_bs")
+
+    if not os.path.exists(root):
+        os.mkdir(root)
+
+    if not os.path.exists(dir_gnn_bs):
+        dataset = NodePropPredDataset(name)
+        print("data preprocess...")
+        preprocess(name, root, dataset)
+        adj_full = sp.load_npz('{}/adj_full.npz'.format(dir_gnn_bs)).astype(np.bool)
+    else:
+        adj_full = sp.load_npz('{}/adj_full.npz'.format(dir_gnn_bs)).astype(np.bool)
+    splitted_idx = np.load('{}/splitted_idx.npy'.format(dir_gnn_bs), allow_pickle=True).item()
+    feats = np.load('{}/feats.npy'.format(dir_gnn_bs))
+    labels = np.load('{}/labels.npy'.format(dir_gnn_bs))
+
+    ## ---- normalize feats ----
+    #if dataset == "reddit" or dataset == "flickr" or dataset == "yelp" or dataset == "amazon" or dataset == "ppi-large":
+    #    train_nodes = np.array(list(set(adj_train.nonzero()[0])))
+    #    train_feats = feats[train_nodes]
+    #    scaler = StandardScaler()
+    #    scaler.fit(train_feats)
+    #    feats = scaler.transform(feats)
+
+    adj_full = adj_full.tolil()
+    train_nodes = splitted_idx['train']
+    y_train = labels[train_nodes]
+    valid_nodes = splitted_idx['valid']
+    y_valid = labels[valid_nodes]
+    test_nodes = splitted_idx['test']
+    y_test = labels[test_nodes]
+
+    return adj_full, feats, train_nodes, y_train, \
+           valid_nodes, y_valid, test_nodes, y_test
+
+
+Output:
+{
+    "experimental_code": "from cython_sampler import BanditMPSampler\n\n# Sampler initialization\nsampler = BanditMPSampler()\nsampler.init(adj_train)\n\n# Function to generate subgraph using the bandit sampler\ndef gen_subgraph(sampler, selected_nodes, adj, num_layer=2, neighbor_limit=10):\n    edges = sampler.sample_graph(selected_nodes)\n    edges = sorted(edges, key=lambda element: (element[0], element[1]))\n\n    expand_list = set()\n    for (src, dst) in edges:\n        expand_list.add(src)\n        expand_list.add(dst)\n    for nod in selected_nodes:\n        expand_list.add(nod)\n    expand_list = list(expand_list)\n    expand_list = sorted(expand_list)\n\n    node_map = {}\n    inverse_node_map = {}\n    m_id = 0\n    for nod in expand_list:\n        node_map[nod] = m_id\n        inverse_node_map[m_id] = nod\n        m_id += 1\n\n    src_list = []\n    dst_list = []\n    n2n_indices_batch=[]\n    n2n_values_batch=[]\n    \n    sample_degree = {}\n    for src in set([e[0] for e in edges]):\n        sample_degree[src] = 0\n    for (src, dst) in edges:\n        sample_degree[src] += 1\n\n    for (src, dst) in edges:\n        n2n_indices_batch.append([node_map[src], node_map[dst]])\n        src_list.append(src)\n        dst_list.append(dst)\n        n2n_values_batch.append(1.)\n    n2n_indices_batch = np.array(n2n_indices_batch)\n    n2n_values_batch = np.array(n2n_values_batch)\n\n    left_indices_batch = [None]*len(n2n_indices_batch)\n    left_values_batch = np.ones(len(n2n_indices_batch))\n    right_indices_batch = [None]*len(n2n_indices_batch)\n    right_values_batch = np.ones(len(n2n_indices_batch))\n    ii = 0\n    for n1, n2 in n2n_indices_batch:\n        left_indices_batch[ii] = [ii, n1]\n        right_indices_batch[ii] = [ii, n2]\n        ii += 1\n\n    node_indices_batch = []\n    node_values_batch = np.ones(len(selected_nodes))\n    ii = 0\n    for nod in selected_nodes:\n        node_indices_batch.append([ii, node_map[nod]])\n        ii += 1\n    node_indices_batch = np.array(node_indices_batch)\n    node_values_batch = np.array(node_values_batch)\n\n    n2n = tf.SparseTensorValue(n2n_indices_batch, n2n_values_batch, [m_id, m_id])\n    left = tf.SparseTensorValue(left_indices_batch, left_values_batch, [len(left_indices_batch), m_id])\n    right = tf.SparseTensorValue(right_indices_batch, right_values_batch, [len(right_indices_batch), m_id])\n    node_select = tf.SparseTensorValue(node_indices_batch, node_values_batch, [len(node_indices_batch), m_id])\n    return expand_list, n2n, left, right, node_select, src_list, dst_list, node_map\n\n# Attention Mechanism (source of feedback for the bandit sampler)\ndef attention_mechanism(name, v, W_s, W_d, V, cur_embed, left, right, n2n):\n    # ... (other attention types are omitted for brevity, focusing on 'generalized_linear')\n    if name == 'generalized_linear':\n        tl = tf.sparse_tensor_dense_matmul(sp_a=left, b=cur_embed)\n        tl = tf.matmul(tl, W_s)\n        tr = tf.sparse_tensor_dense_matmul(sp_a=right, b=cur_embed)\n        tr = tf.matmul(tr, W_d)\n        t = tf.nn.tanh(tf.add(tl,tr))\n        t = tf.matmul(t, tf.reshape(v, [-1,1]))\n        sparse_attention = tf.SparseTensor(n2n.indices, tf.reshape(t, [-1]), n2n.dense_shape)\n        sparse_attention = tf.sparse_softmax(sparse_attention)\n    else:\n        sys.exit(-1)\n    return sparse_attention\n\n# Extracting unnormalized attention values (feedback) from the first layer\n# (from GeniePath or GAT _build method)\nsparse_attention = attention_mechanism(\n        \"generalized_linear\", self.vars_v[i], self.vars_ws[i], self.vars_wd[i],\n        self.vars_V[i], cur_embed, self.left, self.right, self.n2n)\nif i == 0:\n    self.sparse_attention_l0 = sparse_attention.values # Unnormalized attention values\n\n# Inside the training loop: fetch attention values and update sampler\nouts = sess.run([model.opt_op, model.loss, model.sparse_attention_l0, model.outputs], feed_dict=feed_dict)\n# outs[2] contains model.sparse_attention_l0 (the unnormalized attention values)\nsampler.update(np.array(src_list, dtype=np.int32), np.array(dst_list, dtype=np.int32), outs[2])",
+    "experimental_info": "The methodology reformulates sampling variance optimization for GNNs as an adversary bandit problem. A `BanditMPSampler` (likely implementing GNN-BS or GNN-BS.M with EXP3/EXP3.M) is used to iteratively update sampling policy.\n\n**Bandit Sampling Settings:**\n*   Bandit sampler: `BanditMPSampler` is imported and used for neighbor sampling.\n*   Bandit parameters: `eta` is set to `0.4`, `delta` to `0.01`, and `max_reward` to `1.0`.\n*   Neighbor limit (`k` for sampling): `FLAGS.neighbor_limit` is set to `10`.\n*   Feedback mechanism: Unnormalized attention values from the first GNN layer (`model.sparse_attention_l0`) are extracted and provided as feedback to the `sampler.update` method.\n*   Parallel processing: `num_proc` is set to `12`.\n\n**GNN Model & Architecture:**\n*   Model used: `GeniePath` (as instantiated in `train.py`).\n*   Attention mechanism: `generalized_linear` attention is employed for calculating edge importances.\n*   Hidden dimension: `64` units (`FLAGS.hidden1`).\n*   Number of GNN layers: 2 layers are used in the `GeniePath` model (`for i in range(2)` loop).\n*   Residual connections: Enabled (`FLAGS.residual = 1`).\n\n**Training & Evaluation Settings:**\n*   Optimizer: AdamOptimizer.\n*   Learning rate: `0.001`.\n*   Epochs: `3` training epochs per round.\n*   Batch size: `256`.\n*   Dropout rate: `0.0`.\n*   Weight decay (L2 loss): `5e-4`.\n*   Early stopping tolerance: `30` epochs (though not explicitly used in the provided training loop, which runs for a fixed number of epochs).\n*   Training rounds: The model is trained for `10` separate rounds, with parameters reset to an initial state at the beginning of each round.\n*   Evaluation: `ogb.nodeproppred.Evaluator` is used. The metric is `rocauc` for `ogbn-proteins` and `acc` for `ogbn-products`.\n\n**Data Preprocessing:**\n*   Self-loops are added to the adjacency matrix.\n*   Node features for `ogbn-proteins` are generated by averaging edge features.\n*   Node features for `ogbn-products` are used directly from the dataset."
+}
