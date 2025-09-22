@@ -940,5 +940,6 @@
     }
   ],
   "executed_flag": true,
+  "is_experiment_successful": true,
   "experiment_iteration": 1
 }
