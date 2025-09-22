@@ -1292,6 +1292,11 @@
         "smoke_test_yaml": "# Smoke-test configuration (minimal runtime)\nexperiment:\n  name: \"smoke_test\"\n  epochs: 1\n  batch_size: 2\n  dataset: \"tiny-imagenet-c\"\n  num_workers: 2\n  device: \"cpu\"  # keep it tiny for validation purposes\n",
         "full_experiment_yaml": "# Full-scale experiment configuration (production settings)\nexperiment:\n  name: \"full_experiment\"\n  epochs: 90\n  batch_size: 128\n  dataset: \"imagenet-c\"\n  num_workers: 16\n  device: \"cuda\"\n  precision: \"fp32\"\n  seed: 2023\n"
       }
+    },
+    "experimental_results": {
+      "result": "{\n  \"status\": \"failed\",\n  \"error\": \"train_model() was called but the upstream monolithic script that should contain the real training logic was not supplied. Aborting to avoid silent success.\"\n}\n{\n  \"status\": \"skipped\",\n  \"reason\": \"evaluation logic missing\"\n}\n{\n  \"status\": \"skipped\",\n  \"reason\": \"evaluation logic missing\"\n}",
+      "error": "[ERROR] train_model() was called but the upstream monolithic script that should contain the real training logic was not supplied. Aborting to avoid silent success.\n[ERROR] train_model() was called but the upstream monolithic script that should contain the real training logic was not supplied. Aborting to avoid silent success.",
+      "image_file_name_list": []
     }
   },
   "idea_info_history": [
@@ -1344,5 +1349,6 @@
       }
     }
   ],
+  "executed_flag": true,
   "experiment_iteration": 1
 }
