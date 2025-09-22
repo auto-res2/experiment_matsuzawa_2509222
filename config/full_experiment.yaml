@@ -1,0 +1,10 @@
+# Full-scale experiment configuration (production settings)
+experiment:
+  name: "full_experiment"
+  epochs: 90
+  batch_size: 128
+  dataset: "imagenet-c"
+  num_workers: 16
+  device: "cuda"
+  precision: "fp32"
+  seed: 2023

@@ -1,0 +1,8 @@
+# Smoke-test configuration (minimal runtime)
+experiment:
+  name: "smoke_test"
+  epochs: 1
+  batch_size: 2
+  dataset: "tiny-imagenet-c"
+  num_workers: 2
+  device: "cpu"  # keep it tiny for validation purposes
