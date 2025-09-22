@@ -327,11 +327,8 @@ No file paper.aux.
 [Loading MPS to PDF converter (version 2006.09.02).]
 ) (/usr/share/texlive/texmf-dist/tex/latex/epstopdf-pkg/epstopdf-base.sty
 (/usr/share/texlive/texmf-dist/tex/latex/latexconfig/epstopdf-sys.cfg))
-
-Package pgfplots Warning: running in backwards compatibility mode (unsuitable t
-ick labels; missing features). Consider writing \pgfplotsset{compat=1.18} into 
-your preamble.
- on input line 40.
+Package pgfplots notification 'compat/show suggested version=true': document ha
+s been generated with the most recent feature set (\pgfplotsset{compat=1.18}).
 
 (/usr/share/texlive/texmf-dist/tex/latex/microtype/mt-ptm.cfg)
 (/usr/share/texlive/texmf-dist/tex/latex/microtype/mt-cmr.cfg)
@@ -340,234 +337,100 @@ your preamble.
 (/usr/share/texlive/texmf-dist/tex/latex/amsfonts/umsb.fd)
 (/usr/share/texlive/texmf-dist/tex/latex/microtype/mt-msb.cfg)
 (/usr/share/texlive/texmf-dist/tex/latex/base/t1cmtt.fd)
-
-! LaTeX Error: Unicode character ^^C (U+0003)
-               not set up for use with LaTeX.
-
-See the LaTeX manual or LaTeX Companion for explanation.
-Type  H <return>  for immediate help.
- ...                                              
-                                                  
-l.45 ...tch estimator that replaces exact query^^C
-                                                  key dot-products with an $...
-
 (/usr/share/texlive/texmf-dist/tex/latex/psnfss/t1phv.fd)
 
-! LaTeX Error: Unicode character ^^C (U+0003)
-               not set up for use with LaTeX.
-
-See the LaTeX manual or LaTeX Companion for explanation.
-Type  H <return>  for immediate help.
- ...                                              
-                                                  
-l.49 ...cident edges according to learned query^^C
-                                                  key similarities and have ...
-
-! Text line contains an invalid character.
-l.49 ...ndence on neighbourhood size renders na^^@
-                                                  efve implementations intra...
-
-
-! LaTeX Error: Unicode character ^^T (U+0014)
-               not set up for use with LaTeX.
-
-See the LaTeX manual or LaTeX Companion for explanation.
-Type  H <return>  for immediate help.
- ...                                              
-                                                  
-l.49 ...ion floating-point operations per layer^^T
-                                                  well beyond the budget of ...
-
-
 Package natbib Warning: Citation `hua-2022-transformer' on page 1 undefined on 
-input line 50.
-
-
-! LaTeX Error: Unicode character ^^Y (U+0019)
-               not set up for use with LaTeX.
-
-See the LaTeX manual or LaTeX Companion for explanation.
-Type  H <return>  for immediate help.
- ...                                              
-                                                  
-l.50 ...ining epochs more than $90\%$ of a node^^Y
-                                                  s top-32 attentive neighbo...
-
-
-! LaTeX Error: Unicode character ^^T (U+0014)
-               not set up for use with LaTeX.
-
-See the LaTeX manual or LaTeX Companion for explanation.
-Type  H <return>  for immediate help.
- ...                                              
-                                                  
-l.51 ...ivial. Per-node caches must remain tiny^^T
-                                                  tens of integers^^Tto fit ...
-
-
-! LaTeX Error: Unicode character ^^T (U+0014)
-               not set up for use with LaTeX.
-
-See the LaTeX manual or LaTeX Companion for explanation.
-Type  H <return>  for immediate help.
- ...                                              
-                                                  
-l.51 ...hes must remain tiny^^Ttens of integers^^T
-                                                  to fit inside GPU memory, ...
+input line 56.
 
 [1{/var/lib/texmf/fonts/map/pdftex/updmap/pdftex.map}{/usr/share/texlive/texmf-
 dist/fonts/enc/dvips/base/8r.enc}]
 (/usr/share/texlive/texmf-dist/tex/latex/psnfss/ts1ptm.fd)
 
-! LaTeX Error: Unicode character ^^T (U+0014)
-               not set up for use with LaTeX.
-
-See the LaTeX manual or LaTeX Companion for explanation.
-Type  H <return>  for immediate help.
- ...                                              
-                                                  
-l.54 ... influential neighbours ($|C|\approx 8$^^T
-                                                  32). During the next epoch...
-
-
-! LaTeX Error: Unicode character ^^T (U+0014)
-               not set up for use with LaTeX.
-
-See the LaTeX manual or LaTeX Companion for explanation.
-Type  H <return>  for immediate help.
- ...                                              
-                                                  
-l.56 ...-\delta$, enabling predictable accuracy^^T
-                                                  speed trade-offs without f...
-
-
 Package natbib Warning: Citation `hu-2024-accelerating' on page 2 undefined on 
-input line 57.
+input line 65.
 
 
 Package natbib Warning: Citation `liu-2022-gact' on page 2 undefined on input l
-ine 57.
+ine 65.
+
+
+LaTeX Warning: Reference `sec:related' on page 2 undefined on input line 79.
+
+
+LaTeX Warning: Reference `sec:background' on page 2 undefined on input line 79.
+
+
+
+LaTeX Warning: Reference `sec:method' on page 2 undefined on input line 79.
+
+
+LaTeX Warning: Reference `sec:setup' on page 2 undefined on input line 79.
+
+
+LaTeX Warning: Reference `sec:results' on page 2 undefined on input line 79.
+
+
+LaTeX Warning: Reference `sec:conclusion' on page 2 undefined on input line 79.
+
 
 
 Package natbib Warning: Citation `liu-2020-bandit' on page 2 undefined on input
- line 71.
+ line 83.
 
 
 Package natbib Warning: Citation `zeng-2019-graphsaint' on page 2 undefined on 
-input line 71.
+input line 83.
 
 
 Package natbib Warning: Citation `hua-2022-transformer' on page 2 undefined on 
-input line 71.
+input line 83.
 
 
 Package natbib Warning: Citation `author-year-adaptive' on page 2 undefined on 
-input line 72.
+input line 85.
 
 
 Package natbib Warning: Citation `author-year-dynamic' on page 2 undefined on i
-nput line 72.
+nput line 85.
 
 
 Package natbib Warning: Citation `liu-2022-rsc' on page 2 undefined on input li
-ne 73.
-
-
-Package natbib Warning: Citation `hu-2024-accelerating' on page 2 undefined on 
-input line 74.
-
-
-Package natbib Warning: Citation `zhang-2024-two' on page 2 undefined on input 
-line 74.
-
-
-Package natbib Warning: Citation `chen-2021-unified' on page 2 undefined on inp
-ut line 74.
-
-
-Package natbib Warning: Citation `mustafa-2023-are' on page 2 undefined on inpu
-t line 75.
-
-
-Package natbib Warning: Citation `mustafa-2024-gate' on page 2 undefined on inp
-ut line 75.
+ne 87.
 
 [2]
 
-! LaTeX Error: Unicode character ^^Y (U+0019)
-               not set up for use with LaTeX.
-
-See the LaTeX manual or LaTeX Companion for explanation.
-Type  H <return>  for immediate help.
- ...                                              
-                                                  
-l.80 ... three epochs at least $90\%$ of a node^^Y
-                                                  s top-$T$ neighbours ($T=3...
-
-
-! LaTeX Error: Unicode character ^^T (U+0014)
-               not set up for use with LaTeX.
-
-See the LaTeX manual or LaTeX Companion for explanation.
-Type  H <return>  for immediate help.
- ...                                              
-                                                  
-l.82 ...h therefore provides a tunable accuracy^^T
-                                                  speed trade-off independen...
-
-
-! LaTeX Error: Unicode character ^^T (U+0014)
-               not set up for use with LaTeX.
-
-See the LaTeX manual or LaTeX Companion for explanation.
-Type  H <return>  for immediate help.
- ...                                              
-                                                  
-l.87 ..._v$ the stored score is reused verbatim^^T
-                                                  no hashing, sketching or m...
-
-
-! LaTeX Error: Unicode character ^^Y (U+0019)
-               not set up for use with LaTeX.
-
-See the LaTeX manual or LaTeX Companion for explanation.
-Type  H <return>  for immediate help.
- ...                                              
-                                                  
-l.87 ...ronously by inserting the current epoch^^Y
-                                                  s top-$T$ edges using an e...
-
-
-! LaTeX Error: Unicode character ^^Y (U+0019)
-               not set up for use with LaTeX.
-
-See the LaTeX manual or LaTeX Companion for explanation.
-Type  H <return>  for immediate help.
- ...                                              
-                                                  
-l.92 ...+ T)$, a sharp reduction from HiPPO-GAT^^Y
-                                                  s $O(\log d)$.
-
 Package natbib Warning: Citation `hu-2024-accelerating' on page 3 undefined on 
-input line 94.
+input line 89.
 
 
-Package natbib Warning: Citation `liu-2022-gact' on page 3 undefined on input l
-ine 94.
+Package natbib Warning: Citation `zhang-2024-two' on page 3 undefined on input 
+line 89.
 
 
-Underfull \vbox (badness 1571) has occurred while \output is active [3]
+Package natbib Warning: Citation `chen-2021-unified' on page 3 undefined on inp
+ut line 89.
 
-! LaTeX Error: Unicode character ^^T (U+0014)
-               not set up for use with LaTeX.
 
-See the LaTeX manual or LaTeX Companion for explanation.
-Type  H <return>  for immediate help.
- ...                                              
-                                                  
-l.103 ...e error if any dataset file is missing^^T
-                                                  no silent fall-backs are e...
+Package natbib Warning: Citation `mustafa-2023-are' on page 3 undefined on inpu
+t line 91.
 
+
+Package natbib Warning: Citation `mustafa-2024-gate' on page 3 undefined on inp
+ut line 91.
+
+[3]
+
+Package natbib Warning: Citation `hu-2024-accelerating' on page 4 undefined on 
+input line 122.
+
+
+Package natbib Warning: Citation `liu-2022-gact' on page 4 undefined on input l
+ine 122.
+
+
+Underfull \hbox (badness 10000) in paragraph at lines 122--123
+[]\T1/ptm/b/n/10 (+20) Implementation de-tails \T1/ptm/m/n/10 (+20) The com-ple
+te pipeline is ex-pressed as a cus-tom
 [4]
 No file paper.bbl.
 
@@ -631,6 +494,12 @@ Transcript written on ectt1000.log.
 mktexpk: /home/runner/.texlive2023/texmf-var/fonts/pk/ljfour/jknappen/ec/ectt1000.600pk: successfully generated.
 
 
+LaTeX Warning: There were undefined references.
+
+
+LaTeX Warning: Label(s) may have changed. Rerun to get cross-references right.
+
+
 Package rerunfilecheck Warning: File `paper.out' has changed.
 (rerunfilecheck)                Rerun to get outlines right
 (rerunfilecheck)                or use package `bookmark'.
@@ -649,7 +518,7 @@ y7.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/symbols/msbm1
 share/texlive/texmf-dist/fonts/type1/urw/times/utmb8a.pfb></usr/share/texlive/t
 exmf-dist/fonts/type1/urw/times/utmr8a.pfb></usr/share/texlive/texmf-dist/fonts
 /type1/urw/times/utmri8a.pfb>
-Output written on paper.pdf (5 pages, 162133 bytes).
+Output written on paper.pdf (5 pages, 161671 bytes).
 Transcript written on paper.log.
 This is BibTeX, Version 0.99d (TeX Live 2023/Debian)
 The top-level auxiliary file: paper.aux
@@ -997,11 +866,8 @@ Document Style - pseudocode environments for use with the `algorithmicx' style
 [Loading MPS to PDF converter (version 2006.09.02).]
 ) (/usr/share/texlive/texmf-dist/tex/latex/epstopdf-pkg/epstopdf-base.sty
 (/usr/share/texlive/texmf-dist/tex/latex/latexconfig/epstopdf-sys.cfg))
-
-Package pgfplots Warning: running in backwards compatibility mode (unsuitable t
-ick labels; missing features). Consider writing \pgfplotsset{compat=1.18} into 
-your preamble.
- on input line 40.
+Package pgfplots notification 'compat/show suggested version=true': document ha
+s been generated with the most recent feature set (\pgfplotsset{compat=1.18}).
 
 (./paper.out) (./paper.out)
 (/usr/share/texlive/texmf-dist/tex/latex/microtype/mt-ptm.cfg)
@@ -1011,234 +877,80 @@ your preamble.
 (/usr/share/texlive/texmf-dist/tex/latex/amsfonts/umsb.fd)
 (/usr/share/texlive/texmf-dist/tex/latex/microtype/mt-msb.cfg)
 (/usr/share/texlive/texmf-dist/tex/latex/base/t1cmtt.fd)
-
-! LaTeX Error: Unicode character ^^C (U+0003)
-               not set up for use with LaTeX.
-
-See the LaTeX manual or LaTeX Companion for explanation.
-Type  H <return>  for immediate help.
- ...                                              
-                                                  
-l.45 ...tch estimator that replaces exact query^^C
-                                                  key dot-products with an $...
-
 (/usr/share/texlive/texmf-dist/tex/latex/psnfss/t1phv.fd)
 
-! LaTeX Error: Unicode character ^^C (U+0003)
-               not set up for use with LaTeX.
-
-See the LaTeX manual or LaTeX Companion for explanation.
-Type  H <return>  for immediate help.
- ...                                              
-                                                  
-l.49 ...cident edges according to learned query^^C
-                                                  key similarities and have ...
-
-! Text line contains an invalid character.
-l.49 ...ndence on neighbourhood size renders na^^@
-                                                  efve implementations intra...
-
-
-! LaTeX Error: Unicode character ^^T (U+0014)
-               not set up for use with LaTeX.
-
-See the LaTeX manual or LaTeX Companion for explanation.
-Type  H <return>  for immediate help.
- ...                                              
-                                                  
-l.49 ...ion floating-point operations per layer^^T
-                                                  well beyond the budget of ...
-
-
 Package natbib Warning: Citation `hua-2022-transformer' on page 1 undefined on 
-input line 50.
-
-
-! LaTeX Error: Unicode character ^^Y (U+0019)
-               not set up for use with LaTeX.
-
-See the LaTeX manual or LaTeX Companion for explanation.
-Type  H <return>  for immediate help.
- ...                                              
-                                                  
-l.50 ...ining epochs more than $90\%$ of a node^^Y
-                                                  s top-32 attentive neighbo...
-
-
-! LaTeX Error: Unicode character ^^T (U+0014)
-               not set up for use with LaTeX.
-
-See the LaTeX manual or LaTeX Companion for explanation.
-Type  H <return>  for immediate help.
- ...                                              
-                                                  
-l.51 ...ivial. Per-node caches must remain tiny^^T
-                                                  tens of integers^^Tto fit ...
-
-
-! LaTeX Error: Unicode character ^^T (U+0014)
-               not set up for use with LaTeX.
-
-See the LaTeX manual or LaTeX Companion for explanation.
-Type  H <return>  for immediate help.
- ...                                              
-                                                  
-l.51 ...hes must remain tiny^^Ttens of integers^^T
-                                                  to fit inside GPU memory, ...
+input line 56.
 
 [1{/var/lib/texmf/fonts/map/pdftex/updmap/pdftex.map}{/usr/share/texlive/texmf-
 dist/fonts/enc/dvips/base/8r.enc}]
 (/usr/share/texlive/texmf-dist/tex/latex/psnfss/ts1ptm.fd)
 
-! LaTeX Error: Unicode character ^^T (U+0014)
-               not set up for use with LaTeX.
-
-See the LaTeX manual or LaTeX Companion for explanation.
-Type  H <return>  for immediate help.
- ...                                              
-                                                  
-l.54 ... influential neighbours ($|C|\approx 8$^^T
-                                                  32). During the next epoch...
-
-
-! LaTeX Error: Unicode character ^^T (U+0014)
-               not set up for use with LaTeX.
-
-See the LaTeX manual or LaTeX Companion for explanation.
-Type  H <return>  for immediate help.
- ...                                              
-                                                  
-l.56 ...-\delta$, enabling predictable accuracy^^T
-                                                  speed trade-offs without f...
-
-
 Package natbib Warning: Citation `hu-2024-accelerating' on page 2 undefined on 
-input line 57.
+input line 65.
 
 
 Package natbib Warning: Citation `liu-2022-gact' on page 2 undefined on input l
-ine 57.
+ine 65.
 
 
 Package natbib Warning: Citation `liu-2020-bandit' on page 2 undefined on input
- line 71.
+ line 83.
 
 
 Package natbib Warning: Citation `zeng-2019-graphsaint' on page 2 undefined on 
-input line 71.
+input line 83.
 
 
 Package natbib Warning: Citation `hua-2022-transformer' on page 2 undefined on 
-input line 71.
+input line 83.
 
 
 Package natbib Warning: Citation `author-year-adaptive' on page 2 undefined on 
-input line 72.
+input line 85.
 
 
 Package natbib Warning: Citation `author-year-dynamic' on page 2 undefined on i
-nput line 72.
+nput line 85.
 
 
 Package natbib Warning: Citation `liu-2022-rsc' on page 2 undefined on input li
-ne 73.
-
-
-Package natbib Warning: Citation `hu-2024-accelerating' on page 2 undefined on 
-input line 74.
-
-
-Package natbib Warning: Citation `zhang-2024-two' on page 2 undefined on input 
-line 74.
-
-
-Package natbib Warning: Citation `chen-2021-unified' on page 2 undefined on inp
-ut line 74.
-
-
-Package natbib Warning: Citation `mustafa-2023-are' on page 2 undefined on inpu
-t line 75.
-
-
-Package natbib Warning: Citation `mustafa-2024-gate' on page 2 undefined on inp
-ut line 75.
+ne 87.
 
 [2]
 
-! LaTeX Error: Unicode character ^^Y (U+0019)
-               not set up for use with LaTeX.
-
-See the LaTeX manual or LaTeX Companion for explanation.
-Type  H <return>  for immediate help.
- ...                                              
-                                                  
-l.80 ... three epochs at least $90\%$ of a node^^Y
-                                                  s top-$T$ neighbours ($T=3...
-
-
-! LaTeX Error: Unicode character ^^T (U+0014)
-               not set up for use with LaTeX.
-
-See the LaTeX manual or LaTeX Companion for explanation.
-Type  H <return>  for immediate help.
- ...                                              
-                                                  
-l.82 ...h therefore provides a tunable accuracy^^T
-                                                  speed trade-off independen...
-
-
-! LaTeX Error: Unicode character ^^T (U+0014)
-               not set up for use with LaTeX.
-
-See the LaTeX manual or LaTeX Companion for explanation.
-Type  H <return>  for immediate help.
- ...                                              
-                                                  
-l.87 ..._v$ the stored score is reused verbatim^^T
-                                                  no hashing, sketching or m...
-
-
-! LaTeX Error: Unicode character ^^Y (U+0019)
-               not set up for use with LaTeX.
-
-See the LaTeX manual or LaTeX Companion for explanation.
-Type  H <return>  for immediate help.
- ...                                              
-                                                  
-l.87 ...ronously by inserting the current epoch^^Y
-                                                  s top-$T$ edges using an e...
-
-
-! LaTeX Error: Unicode character ^^Y (U+0019)
-               not set up for use with LaTeX.
-
-See the LaTeX manual or LaTeX Companion for explanation.
-Type  H <return>  for immediate help.
- ...                                              
-                                                  
-l.92 ...+ T)$, a sharp reduction from HiPPO-GAT^^Y
-                                                  s $O(\log d)$.
-
 Package natbib Warning: Citation `hu-2024-accelerating' on page 3 undefined on 
-input line 94.
+input line 89.
 
 
-Package natbib Warning: Citation `liu-2022-gact' on page 3 undefined on input l
-ine 94.
+Package natbib Warning: Citation `zhang-2024-two' on page 3 undefined on input 
+line 89.
 
 
-Underfull \vbox (badness 1571) has occurred while \output is active [3]
+Package natbib Warning: Citation `chen-2021-unified' on page 3 undefined on inp
+ut line 89.
 
-! LaTeX Error: Unicode character ^^T (U+0014)
-               not set up for use with LaTeX.
 
-See the LaTeX manual or LaTeX Companion for explanation.
-Type  H <return>  for immediate help.
- ...                                              
-                                                  
-l.103 ...e error if any dataset file is missing^^T
-                                                  no silent fall-backs are e...
+Package natbib Warning: Citation `mustafa-2023-are' on page 3 undefined on inpu
+t line 91.
 
+
+Package natbib Warning: Citation `mustafa-2024-gate' on page 3 undefined on inp
+ut line 91.
+
+[3]
+
+Package natbib Warning: Citation `hu-2024-accelerating' on page 4 undefined on 
+input line 122.
+
+
+Package natbib Warning: Citation `liu-2022-gact' on page 4 undefined on input l
+ine 122.
+
+
+Underfull \hbox (badness 10000) in paragraph at lines 122--123
+[]\T1/ptm/b/n/10 (+20) Implementation de-tails \T1/ptm/m/n/10 (+20) The com-ple
+te pipeline is ex-pressed as a cus-tom
 [4] (./paper.bbl
 
 Package natbib Warning: Empty `thebibliography' environment on input line 8.
@@ -1261,7 +973,7 @@ y7.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/symbols/msbm1
 share/texlive/texmf-dist/fonts/type1/urw/times/utmb8a.pfb></usr/share/texlive/t
 exmf-dist/fonts/type1/urw/times/utmr8a.pfb></usr/share/texlive/texmf-dist/fonts
 /type1/urw/times/utmri8a.pfb>
-Output written on paper.pdf (5 pages, 162929 bytes).
+Output written on paper.pdf (5 pages, 162648 bytes).
 Transcript written on paper.log.
 This is pdfTeX, Version 3.141592653-2.6-1.40.25 (TeX Live 2023/Debian) (preloaded format=pdflatex)
  restricted \write18 enabled.
@@ -1592,11 +1304,8 @@ Document Style - pseudocode environments for use with the `algorithmicx' style
 [Loading MPS to PDF converter (version 2006.09.02).]
 ) (/usr/share/texlive/texmf-dist/tex/latex/epstopdf-pkg/epstopdf-base.sty
 (/usr/share/texlive/texmf-dist/tex/latex/latexconfig/epstopdf-sys.cfg))
-
-Package pgfplots Warning: running in backwards compatibility mode (unsuitable t
-ick labels; missing features). Consider writing \pgfplotsset{compat=1.18} into 
-your preamble.
- on input line 40.
+Package pgfplots notification 'compat/show suggested version=true': document ha
+s been generated with the most recent feature set (\pgfplotsset{compat=1.18}).
 
 (./paper.out) (./paper.out)
 (/usr/share/texlive/texmf-dist/tex/latex/microtype/mt-ptm.cfg)
@@ -1606,234 +1315,80 @@ your preamble.
 (/usr/share/texlive/texmf-dist/tex/latex/amsfonts/umsb.fd)
 (/usr/share/texlive/texmf-dist/tex/latex/microtype/mt-msb.cfg)
 (/usr/share/texlive/texmf-dist/tex/latex/base/t1cmtt.fd)
-
-! LaTeX Error: Unicode character ^^C (U+0003)
-               not set up for use with LaTeX.
-
-See the LaTeX manual or LaTeX Companion for explanation.
-Type  H <return>  for immediate help.
- ...                                              
-                                                  
-l.45 ...tch estimator that replaces exact query^^C
-                                                  key dot-products with an $...
-
 (/usr/share/texlive/texmf-dist/tex/latex/psnfss/t1phv.fd)
 
-! LaTeX Error: Unicode character ^^C (U+0003)
-               not set up for use with LaTeX.
-
-See the LaTeX manual or LaTeX Companion for explanation.
-Type  H <return>  for immediate help.
- ...                                              
-                                                  
-l.49 ...cident edges according to learned query^^C
-                                                  key similarities and have ...
-
-! Text line contains an invalid character.
-l.49 ...ndence on neighbourhood size renders na^^@
-                                                  efve implementations intra...
-
-
-! LaTeX Error: Unicode character ^^T (U+0014)
-               not set up for use with LaTeX.
-
-See the LaTeX manual or LaTeX Companion for explanation.
-Type  H <return>  for immediate help.
- ...                                              
-                                                  
-l.49 ...ion floating-point operations per layer^^T
-                                                  well beyond the budget of ...
-
-
 Package natbib Warning: Citation `hua-2022-transformer' on page 1 undefined on 
-input line 50.
-
-
-! LaTeX Error: Unicode character ^^Y (U+0019)
-               not set up for use with LaTeX.
-
-See the LaTeX manual or LaTeX Companion for explanation.
-Type  H <return>  for immediate help.
- ...                                              
-                                                  
-l.50 ...ining epochs more than $90\%$ of a node^^Y
-                                                  s top-32 attentive neighbo...
-
-
-! LaTeX Error: Unicode character ^^T (U+0014)
-               not set up for use with LaTeX.
-
-See the LaTeX manual or LaTeX Companion for explanation.
-Type  H <return>  for immediate help.
- ...                                              
-                                                  
-l.51 ...ivial. Per-node caches must remain tiny^^T
-                                                  tens of integers^^Tto fit ...
-
-
-! LaTeX Error: Unicode character ^^T (U+0014)
-               not set up for use with LaTeX.
-
-See the LaTeX manual or LaTeX Companion for explanation.
-Type  H <return>  for immediate help.
- ...                                              
-                                                  
-l.51 ...hes must remain tiny^^Ttens of integers^^T
-                                                  to fit inside GPU memory, ...
+input line 56.
 
 [1{/var/lib/texmf/fonts/map/pdftex/updmap/pdftex.map}{/usr/share/texlive/texmf-
 dist/fonts/enc/dvips/base/8r.enc}]
 (/usr/share/texlive/texmf-dist/tex/latex/psnfss/ts1ptm.fd)
 
-! LaTeX Error: Unicode character ^^T (U+0014)
-               not set up for use with LaTeX.
-
-See the LaTeX manual or LaTeX Companion for explanation.
-Type  H <return>  for immediate help.
- ...                                              
-                                                  
-l.54 ... influential neighbours ($|C|\approx 8$^^T
-                                                  32). During the next epoch...
-
-
-! LaTeX Error: Unicode character ^^T (U+0014)
-               not set up for use with LaTeX.
-
-See the LaTeX manual or LaTeX Companion for explanation.
-Type  H <return>  for immediate help.
- ...                                              
-                                                  
-l.56 ...-\delta$, enabling predictable accuracy^^T
-                                                  speed trade-offs without f...
-
-
 Package natbib Warning: Citation `hu-2024-accelerating' on page 2 undefined on 
-input line 57.
+input line 65.
 
 
 Package natbib Warning: Citation `liu-2022-gact' on page 2 undefined on input l
-ine 57.
+ine 65.
 
 
 Package natbib Warning: Citation `liu-2020-bandit' on page 2 undefined on input
- line 71.
+ line 83.
 
 
 Package natbib Warning: Citation `zeng-2019-graphsaint' on page 2 undefined on 
-input line 71.
+input line 83.
 
 
 Package natbib Warning: Citation `hua-2022-transformer' on page 2 undefined on 
-input line 71.
+input line 83.
 
 
 Package natbib Warning: Citation `author-year-adaptive' on page 2 undefined on 
-input line 72.
+input line 85.
 
 
 Package natbib Warning: Citation `author-year-dynamic' on page 2 undefined on i
-nput line 72.
+nput line 85.
 
 
 Package natbib Warning: Citation `liu-2022-rsc' on page 2 undefined on input li
-ne 73.
-
-
-Package natbib Warning: Citation `hu-2024-accelerating' on page 2 undefined on 
-input line 74.
-
-
-Package natbib Warning: Citation `zhang-2024-two' on page 2 undefined on input 
-line 74.
-
-
-Package natbib Warning: Citation `chen-2021-unified' on page 2 undefined on inp
-ut line 74.
-
-
-Package natbib Warning: Citation `mustafa-2023-are' on page 2 undefined on inpu
-t line 75.
-
-
-Package natbib Warning: Citation `mustafa-2024-gate' on page 2 undefined on inp
-ut line 75.
+ne 87.
 
 [2]
 
-! LaTeX Error: Unicode character ^^Y (U+0019)
-               not set up for use with LaTeX.
-
-See the LaTeX manual or LaTeX Companion for explanation.
-Type  H <return>  for immediate help.
- ...                                              
-                                                  
-l.80 ... three epochs at least $90\%$ of a node^^Y
-                                                  s top-$T$ neighbours ($T=3...
-
-
-! LaTeX Error: Unicode character ^^T (U+0014)
-               not set up for use with LaTeX.
-
-See the LaTeX manual or LaTeX Companion for explanation.
-Type  H <return>  for immediate help.
- ...                                              
-                                                  
-l.82 ...h therefore provides a tunable accuracy^^T
-                                                  speed trade-off independen...
-
-
-! LaTeX Error: Unicode character ^^T (U+0014)
-               not set up for use with LaTeX.
-
-See the LaTeX manual or LaTeX Companion for explanation.
-Type  H <return>  for immediate help.
- ...                                              
-                                                  
-l.87 ..._v$ the stored score is reused verbatim^^T
-                                                  no hashing, sketching or m...
-
-
-! LaTeX Error: Unicode character ^^Y (U+0019)
-               not set up for use with LaTeX.
-
-See the LaTeX manual or LaTeX Companion for explanation.
-Type  H <return>  for immediate help.
- ...                                              
-                                                  
-l.87 ...ronously by inserting the current epoch^^Y
-                                                  s top-$T$ edges using an e...
-
-
-! LaTeX Error: Unicode character ^^Y (U+0019)
-               not set up for use with LaTeX.
-
-See the LaTeX manual or LaTeX Companion for explanation.
-Type  H <return>  for immediate help.
- ...                                              
-                                                  
-l.92 ...+ T)$, a sharp reduction from HiPPO-GAT^^Y
-                                                  s $O(\log d)$.
-
 Package natbib Warning: Citation `hu-2024-accelerating' on page 3 undefined on 
-input line 94.
+input line 89.
 
 
-Package natbib Warning: Citation `liu-2022-gact' on page 3 undefined on input l
-ine 94.
+Package natbib Warning: Citation `zhang-2024-two' on page 3 undefined on input 
+line 89.
 
 
-Underfull \vbox (badness 1571) has occurred while \output is active [3]
+Package natbib Warning: Citation `chen-2021-unified' on page 3 undefined on inp
+ut line 89.
 
-! LaTeX Error: Unicode character ^^T (U+0014)
-               not set up for use with LaTeX.
 
-See the LaTeX manual or LaTeX Companion for explanation.
-Type  H <return>  for immediate help.
- ...                                              
-                                                  
-l.103 ...e error if any dataset file is missing^^T
-                                                  no silent fall-backs are e...
+Package natbib Warning: Citation `mustafa-2023-are' on page 3 undefined on inpu
+t line 91.
 
+
+Package natbib Warning: Citation `mustafa-2024-gate' on page 3 undefined on inp
+ut line 91.
+
+[3]
+
+Package natbib Warning: Citation `hu-2024-accelerating' on page 4 undefined on 
+input line 122.
+
+
+Package natbib Warning: Citation `liu-2022-gact' on page 4 undefined on input l
+ine 122.
+
+
+Underfull \hbox (badness 10000) in paragraph at lines 122--123
+[]\T1/ptm/b/n/10 (+20) Implementation de-tails \T1/ptm/m/n/10 (+20) The com-ple
+te pipeline is ex-pressed as a cus-tom
 [4] (./paper.bbl
 
 Package natbib Warning: Empty `thebibliography' environment on input line 8.
@@ -1856,5 +1411,5 @@ y7.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/symbols/msbm1
 share/texlive/texmf-dist/fonts/type1/urw/times/utmb8a.pfb></usr/share/texlive/t
 exmf-dist/fonts/type1/urw/times/utmr8a.pfb></usr/share/texlive/texmf-dist/fonts
 /type1/urw/times/utmri8a.pfb>
-Output written on paper.pdf (5 pages, 162929 bytes).
+Output written on paper.pdf (5 pages, 162648 bytes).
 Transcript written on paper.log.
