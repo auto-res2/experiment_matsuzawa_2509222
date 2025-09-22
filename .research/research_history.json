@@ -517,6 +517,68 @@
       }
     }
   ],
+  "reference_research_study_list": [
+    {
+      "title": "Deep equilibrium models."
+    },
+    {
+      "title": "Scaling graph neural networks with approximate pagerank."
+    },
+    {
+      "title": "Distributed graph neural network training with periodic historical embedding synchronization."
+    },
+    {
+      "title": "Stochastic training of graph convolutional networks with variance reduction."
+    },
+    {
+      "title": "Fastgcn: fast learning with graph convolutional networks via importance sampling."
+    },
+    {
+      "title": "Simple and deep graph convolutional networks."
+    },
+    {
+      "title": "Optimization-induced graph implicit nonlinear diffusion."
+    },
+    {
+      "title": "Neural ordinary differential equations."
+    },
+    {
+      "title": "Graph unrolling networks: Interpretable neural networks for graph signal denoising"
+    },
+    {
+      "title": "Cluster-gcn: An efficient algorithm for training deep and large graph convolutional networks."
+    },
+    {
+      "title": "Minimal variance sampling with provable guarantees for fast training of graph neural networks."
+    },
+    {
+      "title": "Vq-gnn: A universal framework to scale up graph neural networks using vector quantization."
+    },
+    {
+      "title": "Implicit deep learning."
+    },
+    {
+      "title": "Gnnautoscale: Scalable and expressive graph neural networks via historical embeddings."
+    },
+    {
+      "title": "Predict then propagate: Graph neural networks meet personalized pagerank."
+    },
+    {
+      "title": "Combining neural networks with personalized pagerank for classification on graphs."
+    },
+    {
+      "title": "Implicit graph neural networks."
+    },
+    {
+      "title": "Inductive representation learning on large graphs."
+    },
+    {
+      "title": "Graph representation learning."
+    },
+    {
+      "title": "Long short-term memory."
+    }
+  ],
   "new_method": {
     "method": "{\n    \"Open Problems\": \"1. Existing drift–aware samplers (SAG-LS, ADLAS) still allocate the same neighbour budget to all target nodes in a layer although variance is highly skewed – a few ‘hub’ nodes dominate the error while >80 % of nodes could use far fewer samples.\\n2. Micro full-batch control-variate passes are helpful but become the new bottleneck on graphs with >10^8 edges or on CPU-only hardware.\\n3. There is no sampler that jointly decides (a) how many neighbours to fetch, (b) at which numeric precision to ship the message, and (c) when to refresh the control-variates, under a strict energy cap.\\n4. A socially relevant gap: low-power edge devices (Raspberry Pi-4, Jetson-Nano) cannot train attentive GNNs at all because both memory and power budgets are exceeded.\",\n    \"Methods\": \"Stochastic Hierarchical Adaptive Neighbour Sampling (SHANS)\\nA. Per-node Hierarchical Budget  k̂  \\n   • For every active node v we maintain an online estimate of its contribution to gradient variance,  σ̂_v^2  (updated by Welford statistics).  k̂_v  is set as  ⌈k_min + (k_max−k_min)·sqrt( σ̂_v^2 /σ̂_max^2 )⌉  and clipped to [k_min,k_max].  Cheap: O(|batch|) time, O(|V_batch|) memory.\\nB. Two-stage Sampler  \\n   1. Fast stage: draw  k̂_v/2  neighbours with stale-attention importance like ADLAS.\\n   2. Corrective stage: draw the remaining  k̂_v−k̂_v/2  via random-walk with restart; this implicitly imports 2-hop context for high-variance hubs without explicit full-batch passes.\\nC. Hutchinson Control-Variate  \\n   • Every R epochs we estimate the full-batch message mean  μ̄_ℓ  by one Hutchinson trace:  μ̄_ℓ≈ 1/S ∑_{s=1}^S P A z_s , where  z_s  are Rademacher vectors and S≪|V| (default 64).  Variance scales O(1/S) yet requires only sparse-matrix–vector multiplies – CPU friendly.\\nD. Mixed-Precision Shipping  \\n   • If GPU power draw P(t) exceeds a user-set cap, messages whose source node degree < θ are down-cast to INT8; hubs stay in FP16/32.  Quantisation noise δ is folded into σ̂_v^2 so budgets compensate automatically.\\nE. Energy-aware Refresh Scheduler  \\n   • A light MRT-style controller selects the next refresh epoch R* by maximising expected accuracy gain per joule using a learned surrogate of variance vs. energy.\\nF. Plug-in API  \\n   •  <200 LoC PyTorch-Geometric sampler “SHANSSampler” exposing  .sample(node_ids, layer_id)  and  .after_backward(loss) .  No CUDA code required.\",\n    \"Experimental Setup\": \"Datasets:  OGB-arxiv, OGB-products, Flickr, Reddit, plus the 15 M-edge ‘uk-2005’ webgraph (to test CPU scalability).\\nModels:  2-, 6-, 10-layer GAT (8 heads, 128 dim) and 4-layer GraphTransformer.\\nBaselines:  Full-batch, GraphSAINT-GAT, SAG-LS, ADLAS.\\nMetrics:  • Test accuracy • Wall-time/epoch • Energy (NVML / INA219 on Jetson) • Peak RAM • Variance of gradient estimator • Bit-width distribution.\\nAblations:  (i) disable hierarchical k̂, (ii) INT8 off, (iii) Hutchinson off, (iv) fixed R.\\nHardware:  RTX 4090 (24 GB), Jetson-Nano (4 GB, 10 W), and Raspberry Pi-4 (8 GB, CPU only).\",\n    \"Experimental Code\": \"class SHANSSampler:\\n    def __init__(self, edge_index, k_min=2, k_max=25, S=64, theta_deg=20):\\n        self.E = edge_index; self.k_min=k_min; self.k_max=k_max\\n        self.S=S; self.theta=theta_deg\\n        self.var = collections.defaultdict(lambda:1.0) # σ̂_v^2\\n        self.cnt = collections.defaultdict(int)\\n        self.rng = torch.Generator()\\n        self.att_ema = torch.ones(edge_index.size(1))\\n        self.deg = torch.bincount(edge_index[1])\\n    def _compute_k(self, v):\\n        s = math.sqrt(self.var[v]/max(self.var.values()))\\n        return int(min(self.k_max,max(self.k_min,round(self.k_max*s))))\\n    def sample(self, nodes, layer):\\n        src,dst,prob=[],[],[]\\n        for v in nodes:\\n            k=self._compute_k(int(v))\\n            k1=k//2; k2=k-k1\\n            # stage1 stale-attention importance\\n            neigh=self._neighbors(v)\\n            w=self.att_ema[neigh]; p=w/w.sum(); sel=torch.multinomial(p,k1)\\n            src+=neigh[sel].tolist(); dst+=[v]*k1; prob+=p[sel].tolist()\\n            # stage2 RW with restart\\n            rw=self._rw_sample(v,k2)\\n            src+=rw; dst+=[v]*k2; prob+=[1./self.deg[v]]*k2\\n        return torch.tensor(src),torch.tensor(dst),torch.tensor(prob)\\n    def after_backward(self, node_ids, g_norm):\\n        for v,gn in zip(node_ids,g_norm):\\n            n=self.cnt[v]; self.cnt[v]+=1\\n            self.var[v]+= (gn**2-self.var[v])/(n+1)\\n    # helper functions _neighbors and _rw_sample omitted for brevity\",\n    \"Expected Result\": \"• SHANS matches full-batch accuracy within 0.15 % on Products, gains +1.4 % on arxiv (thanks to 10-layer models).\\n• Compared with ADLAS: 1.6× faster/epoch on GPU, 2.1× on Jetson, 35 % lower energy at 20 W cap.\\n• CPU-only training on uk-2005 finishes in 4 h vs 9 h (GraphSAINT) at identical accuracy.\\n• Hierarchical k̂ alone cuts variance by 18 %; Hutchinson control-variate gives further 20 %.\\n• Mixed-precision shipping halves PCI-e traffic and saves 28 % energy without quality loss.\",\n    \"Expected Conclusion\": \"SHANS demonstrates that per-node variance-driven budgets, low-cost Hutchinson control-variates and adaptive mixed-precision can be combined into a single, hardware-aware sampler. This removes the last manual knobs of attentive GNN training, opens the door to energy-capped learning on edge devices, and establishes a principled link between quantisation noise and sampling variance – a direction likely to generalise to transformer-style graph models and other data-dependent operators.\"\n}",
     "experimental_design": {
