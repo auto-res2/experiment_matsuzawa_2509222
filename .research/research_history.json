@@ -1400,6 +1400,11 @@
         "smoke_test_yaml": "datasets:\n  imagenet_c:\n    hf_id: ang9867/ImageNet-C\n    split: test\n    take: 1000\n  cifar10_c:\n    hf_id: robro/cifar10-c-parquet\n    split: train\n    take: 1000\n  cifar100_c:\n    hf_id: randall-lab/cifar100-c\n    split: test\n    take: 1000\n  imagenet_vid:\n    hf_id: guanxiongsun/imagenetvid\n    split: validation\n    take: 600\nmodels:\n  - timm/resnet50.a1_in1k\nbatch_size: 32\nlas_decay: 0.1\ntau_skip: 0.0\nsmoke: true\nfine_tune:\n  interval: 512\n  steps: 0\nseverity_levels: [1]",
         "full_experiment_yaml": "datasets:\n  imagenet_c:\n    hf_id: ang9867/ImageNet-C\n    split: test\n    take: null\n  cifar10_c:\n    hf_id: robro/cifar10-c-parquet\n    split: train\n    take: null\n  cifar100_c:\n    hf_id: randall-lab/cifar100-c\n    split: test\n    take: null\n  imagenet_vid:\n    hf_id: guanxiongsun/imagenetvid\n    split: validation\n    take: 30000\nmodels:\n  - timm/resnet50.a1_in1k\n  - timm/convnext_tiny.fb_in22k_ft_in1k\n  - timm/vit_base_patch16_224.augreg2_in21k_ft_in1k\nbatch_size:\n  imagenet_c: 64\n  cifar10_c: 256\n  cifar100_c: 256\n  imagenet_vid: 1\nlas_decay: 0.1\ntau_skip_grid: [0.0, 0.25, 0.5, 0.75, 1.0]\nfine_tune:\n  interval: 128\n  steps: 4\nseverity_levels: [1, 2, 3, 4, 5]\nsmoke: false"
       }
+    },
+    "experimental_results": {
+      "result": "",
+      "error": "",
+      "image_file_name_list": []
     }
   },
   "idea_info_history": [
@@ -1452,5 +1457,6 @@
       }
     }
   ],
+  "executed_flag": false,
   "experiment_iteration": 1
 }
