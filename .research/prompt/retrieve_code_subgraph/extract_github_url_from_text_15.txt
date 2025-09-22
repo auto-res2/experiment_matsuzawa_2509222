@@ -1,0 +1,17 @@
+
+Input:
+# Task
+You carefully read the contents of the “Paper Outline” and select one GitHub link from the “GitHub URLs List” that you think is most relevant to the contents.
+# Constraints
+- Output the index number corresponding to the selected GitHub URL.
+- Be sure to select only one GitHub URL.
+- If there is no related GitHub link, output None.
+# Paper Outline
+Sketch-GNN approximates GNN operations by sketching graph adjacency and node feature matrices into compact, lower-dimensional forms. It utilizes Polynomial Tensor Sketch (PTS) theory to approximate the non-linear activation units by expanding them into a power series and then applying tensor sketches to each power term. The coefficients for this power series approximation are learned directly via gradient descent. To enhance sketch quality and adapt to evolving hidden representations, the framework incorporates learnable Locality Sensitive Hashing (LSH). LSH functions (specifically SimHash) are updated online by selecting a subset of nodes based on gradient signals and minimizing a sampled triplet loss. This online learning avoids the need to unsketch full representations, which would incur O(n) complexity. Furthermore, O(n) complexity in loss evaluation is avoided by employing LSH for sparse forward-pass and back-propagation, evaluating losses only on a selected subset of nodes.
+
+# GitHub URLs List
+['https://github.com/pyg-team/pytorch_geometric', 'https://github.com/rusty1s/pytorch_sparse', 'https://github.com/devnkong/VQ-GNN', 'https://github.com/szzhang17/Scaling-Up-Graph-Neural-Networks-Via-Graph-Coarsening']
+Output:
+{
+    "index": 0
+}
