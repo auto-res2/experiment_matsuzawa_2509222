@@ -6,5 +6,82 @@
     "accelerated test-time adaptation",
     "online adaptation speedup",
     "meta-learning TTA acceleration"
+  ],
+  "research_study_list": [
+    {
+      "title": "Test Time Adaptation With Regularized Loss for Weakly Supervised Salient Object Detection"
+    },
+    {
+      "title": "Tent: Fully Test-Time Adaptation by Entropy Minimization"
+    },
+    {
+      "title": "What How and When Should Object Detectors Update in Continually Changing Test Domains?"
+    },
+    {
+      "title": "DELTA: DEGRADATION-FREE FULLY TEST-TIME ADAPTATION"
+    },
+    {
+      "title": "Test-Time Training with Self-Supervision for Generalization under Distribution Shifts"
+    },
+    {
+      "title": "Improved Test-Time Adaptation for Domain Generalization"
+    },
+    {
+      "title": "Active Test-Time Adaptation: Theoretical Analyses and An Algorithm"
+    },
+    {
+      "title": "Damped Anderson Mixing for Deep Reinforcement Learning: Acceleration, Convergence, and Stabilization"
+    },
+    {
+      "title": "Accelerating Parallel Sampling of Diffusion Models"
+    },
+    {
+      "title": "Trainable Weight Averaging: Efficient Training by Optimizing Historical Solutions"
+    },
+    {
+      "title": "Robust Test-Time Adaptation in Dynamic Scenarios"
+    },
+    {
+      "title": "Test-Time Training with Self-Supervision for Generalization under Distribution Shifts"
+    },
+    {
+      "title": "TTN: A Domain-Shift Aware Batch Normalization in Test-Time Adaptation"
+    },
+    {
+      "title": "Active Test-Time Adaptation: Theoretical Analyses and An Algorithm"
+    },
+    {
+      "title": "Tent: Fully Test-Time Adaptation by Entropy Minimization"
+    },
+    {
+      "title": "Evaluation of Test-Time Adaptation Under Computational Time Constraints"
+    },
+    {
+      "title": "Provably Efficient Model-based Policy Adaptation"
+    },
+    {
+      "title": "Oracle-Efficient Online Learning for Smoothed Adversaries"
+    },
+    {
+      "title": "Online Agnostic Boosting via Regret Minimization"
+    },
+    {
+      "title": "Efficient Non-stationary Online Learning by Wavelets with Applications to Online Distribution Shift Adaptation"
+    },
+    {
+      "title": "Improved Test-Time Adaptation for Domain Generalization"
+    },
+    {
+      "title": "Test Time Adaptation via Conjugate Pseudo-labels"
+    },
+    {
+      "title": "Active Test-Time Adaptation: Theoretical Analyses and An Algorithm"
+    },
+    {
+      "title": "EcoTTA: Memory-Efficient Continual Test-Time Adaptation via Self-Distilled Regularization"
+    },
+    {
+      "title": "Leveraging Proxy of Training Data for Test-Time Adaptation"
+    }
   ]
 }
