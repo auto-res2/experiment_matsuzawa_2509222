@@ -1,0 +1,22 @@
+
+Input:
+The Python standard output and errors are provided below.
+Extract all information related to the experimental results from the standard output, and extract the Python error details from the errors, outputting them exactly as they are without any modifications.
+Do not extract unnecessary execution logs or information about Python package installations.
+
+# Standard Output
+=== [PHASE 2/2] Full experiment start Mon Sep 22 09:55:16 AM UTC 2025 ===
+Starting training ...
+
+
+# Error
+/home/toma/pt-80-1-a-13/_work/experiment_matsuzawa_2509222/experiment_matsuzawa_2509222/src/train.py:212: FutureWarning: `torch.cuda.amp.GradScaler(args...)` is deprecated. Please use `torch.amp.GradScaler('cuda', args...)` instead.
+  scaler = GradScaler()
+/home/toma/pt-80-1-a-13/_work/experiment_matsuzawa_2509222/experiment_matsuzawa_2509222/src/train.py:220: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.
+  with autocast():
+
+Output:
+{
+    "extracted_output": "=== [PHASE 2/2] Full experiment start Mon Sep 22 09:55:16 AM UTC 2025 ===",
+    "extracted_error": "/home/toma/pt-80-1-a-13/_work/experiment_matsuzawa_2509222/experiment_matsuzawa_2509222/src/train.py:212: FutureWarning: `torch.cuda.amp.GradScaler(args...)` is deprecated. Please use `torch.amp.GradScaler('cuda', args...)` instead.\n  scaler = GradScaler()\n/home/toma/pt-80-1-a-13/_work/experiment_matsuzawa_2509222/experiment_matsuzawa_2509222/src/train.py:220: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.\n  with autocast():"
+}
