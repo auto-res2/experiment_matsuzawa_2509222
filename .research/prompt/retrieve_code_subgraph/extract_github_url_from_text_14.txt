@@ -1,0 +1,17 @@
+
+Input:
+# Task
+You carefully read the contents of the “Paper Outline” and select one GitHub link from the “GitHub URLs List” that you think is most relevant to the contents.
+# Constraints
+- Output the index number corresponding to the selected GitHub URL.
+- Be sure to select only one GitHub URL.
+- If there is no related GitHub link, output None.
+# Paper Outline
+The ATTA framework involves a pre-trained model adapting in real-time to streaming test data. The model actively selects informative instances from each batch for labeling, incorporating them into a continually growing training set to update parameters. A labeling budget is strictly managed. For theoretical analysis, learning bounds based on H∆H-distance are established, demonstrating how limited labeled test instances improve performance against distribution shifts. To combat catastrophic forgetting (CF), a selective entropy minimization strategy is employed: low-entropy samples, indicative of alignment with the source distribution, are pseudo-labeled by the frozen source-pretrained model to form a 'source-like' dataset. High-entropy samples, signifying deviation, are actively selected for oracle labeling. The SimATTA algorithm implements this with two key components: 1) **Sample Partitioning:** Unlabeled test samples are divided into high and low entropy sets based on a threshold. 2) **Incremental Clustering:** For high-entropy samples, a novel continual clustering technique (weighted K-means) is used to select representative 'anchors' that cover seen distributions and adapt to new ones, managing redundancy and increasing coverage within a cluster budget. The model then undergoes test-time training using both actively labeled high-entropy anchors and pseudo-labeled low-entropy samples, balancing their influence according to theoretical insights to optimize adaptation and prevent CF.
+
+# GitHub URLs List
+['https://github.com/divelab/ATTA', 'https://github.com/DequanWang/tent', 'https://github.com/mr-eggplant/EATA', 'https://github.com/qinenergy/cotta', 'https://github.com/mr-eggplant/SAR', 'https://github.com/virajprabhu/CLUE']
+Output:
+{
+    "index": 0
+}
