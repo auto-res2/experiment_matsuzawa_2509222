@@ -1,0 +1,524 @@
+
+Input:
+You are a researcher with expertise in engineering in the field of machine learning.
+
+# Instructions
+- The content described in “Repository Content” corresponds to the GitHub repository of the method described in “Method.”
+- Please extract the following two pieces of information from “Repository Content”:
+    - experimental_code：Extract the implementation sections that are directly related to the method described in “Method.”
+    - experimental_info：Extract and output the experimental settings related to the method described in “Method.”
+
+# Method
+The core methodology involves a theoretical derivation of a conservation law for GAT gradient flow dynamics, leveraging rescale invariance and positive homogeneity of activation functions (like ReLU). Based on this insight, the paper proposes a balanced initialization scheme. This scheme sets attention parameters to zero at initialization and scales feature weights (Wl) to satisfy a derived norm preservation law (Wl[i, :]^2 - al[i]^2 = Wl+1[: i]^2). For further improvement, it integrates a Looks-Linear-Orthogonal (LLortho) initialization for feature weights, known for inducing dynamical isometry in perceptrons, prior to the balancing procedure. The approach is validated on GATv2 and GCN models, focusing on the interplay of feature and attention weight norms.
+
+# Repository Content
+File Path: layers.py
+Content:
+import numpy as np
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+
+class GraphAttentionLayer(nn.Module):
+    """
+    Simple GAT layer, similar to https://arxiv.org/abs/1710.10903
+    """
+    def __init__(self, in_features, out_features, dropout, alpha, concat=True):
+        super(GraphAttentionLayer, self).__init__()
+        self.dropout = dropout
+        self.in_features = in_features
+        self.out_features = out_features
+        self.alpha = alpha
+        self.concat = concat
+
+        self.W = nn.Parameter(torch.empty(size=(in_features, out_features)))
+        nn.init.xavier_uniform_(self.W.data, gain=1.414)
+        self.a = nn.Parameter(torch.empty(size=(2*out_features, 1)))
+        nn.init.xavier_uniform_(self.a.data, gain=1.414)
+
+        self.leakyrelu = nn.LeakyReLU(self.alpha)
+
+    def forward(self, h, adj):
+        Wh = torch.mm(h, self.W) # h.shape: (N, in_features), Wh.shape: (N, out_features)
+        e = self._prepare_attentional_mechanism_input(Wh)
+
+        zero_vec = -9e15*torch.ones_like(e)
+        attention = torch.where(adj > 0, e, zero_vec)
+        attention = F.softmax(attention, dim=1)
+        attention = F.dropout(attention, self.dropout, training=self.training)
+        h_prime = torch.matmul(attention, Wh)
+
+        if self.concat:
+            return F.elu(h_prime)
+        else:
+            return h_prime
+
+    def _prepare_attentional_mechanism_input(self, Wh):
+        # Wh.shape (N, out_feature)
+        # self.a.shape (2 * out_feature, 1)
+        # Wh1&2.shape (N, 1)
+        # e.shape (N, N)
+        Wh1 = torch.matmul(Wh, self.a[:self.out_features, :])
+        Wh2 = torch.matmul(Wh, self.a[self.out_features:, :])
+        # broadcast add
+        e = Wh1 + Wh2.T
+        return self.leakyrelu(e)
+
+    def __repr__(self):
+        return self.__class__.__name__ + ' (' + str(self.in_features) + ' -> ' + str(self.out_features) + ')'
+
+
+class SpecialSpmmFunction(torch.autograd.Function):
+    """Special function for only sparse region backpropataion layer."""
+    @staticmethod
+    def forward(ctx, indices, values, shape, b):
+        assert indices.requires_grad == False
+        a = torch.sparse_coo_tensor(indices, values, shape)
+        ctx.save_for_backward(a, b)
+        ctx.N = shape[0]
+        return torch.matmul(a, b)
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        a, b = ctx.saved_tensors
+        grad_values = grad_b = None
+        if ctx.needs_input_grad[1]:
+            grad_a_dense = grad_output.matmul(b.t())
+            edge_idx = a._indices()[0, :] * ctx.N + a._indices()[1, :]
+            grad_values = grad_a_dense.view(-1)[edge_idx]
+        if ctx.needs_input_grad[3]:
+            grad_b = a.t().matmul(grad_output)
+        return None, grad_values, None, grad_b
+
+
+class SpecialSpmm(nn.Module):
+    def forward(self, indices, values, shape, b):
+        return SpecialSpmmFunction.apply(indices, values, shape, b)
+
+    
+class SpGraphAttentionLayer(nn.Module):
+    """
+    Sparse version GAT layer, similar to https://arxiv.org/abs/1710.10903
+    """
+
+    def __init__(self, in_features, out_features, dropout, alpha, concat=True):
+        super(SpGraphAttentionLayer, self).__init__()
+        self.in_features = in_features
+        self.out_features = out_features
+        self.alpha = alpha
+        self.concat = concat
+
+        self.W = nn.Parameter(torch.zeros(size=(in_features, out_features)))
+        nn.init.xavier_normal_(self.W.data, gain=1.414)
+                
+        self.a = nn.Parameter(torch.zeros(size=(1, 2*out_features)))
+        nn.init.xavier_normal_(self.a.data, gain=1.414)
+
+        self.dropout = nn.Dropout(dropout)
+        self.leakyrelu = nn.LeakyReLU(self.alpha)
+        self.special_spmm = SpecialSpmm()
+
+    def forward(self, input, adj):
+        dv = 'cuda' if input.is_cuda else 'cpu'
+
+        N = input.size()[0]
+        edge = adj.nonzero().t()
+
+        h = torch.mm(input, self.W)
+        # h: N x out
+        assert not torch.isnan(h).any()
+
+        # Self-attention on the nodes - Shared attention mechanism
+        edge_h = torch.cat((h[edge[0, :], :], h[edge[1, :], :]), dim=1).t()
+        # edge: 2*D x E
+
+        edge_e = torch.exp(-self.leakyrelu(self.a.mm(edge_h).squeeze()))
+        assert not torch.isnan(edge_e).any()
+        # edge_e: E
+
+        e_rowsum = self.special_spmm(edge, edge_e, torch.Size([N, N]), torch.ones(size=(N,1), device=dv))
+        # e_rowsum: N x 1
+
+        edge_e = self.dropout(edge_e)
+        # edge_e: E
+
+        h_prime = self.special_spmm(edge, edge_e, torch.Size([N, N]), h)
+        assert not torch.isnan(h_prime).any()
+        # h_prime: N x out
+        
+        h_prime = h_prime.div(e_rowsum)
+        # h_prime: N x out
+        assert not torch.isnan(h_prime).any()
+
+        if self.concat:
+            # if this layer is not last layer,
+            return F.elu(h_prime)
+        else:
+            # if this layer is last layer,
+            return h_prime
+
+    def __repr__(self):
+        return self.__class__.__name__ + ' (' + str(self.in_features) + ' -> ' + str(self.out_features) + ')'
+
+File Path: models.py
+Content:
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from layers import GraphAttentionLayer, SpGraphAttentionLayer
+
+
+class GAT(nn.Module):
+    def __init__(self, nfeat, nhid, nclass, dropout, alpha, nheads):
+        """Dense version of GAT."""
+        super(GAT, self).__init__()
+        self.dropout = dropout
+
+        self.attentions = [GraphAttentionLayer(nfeat, nhid, dropout=dropout, alpha=alpha, concat=True) for _ in range(nheads)]
+        for i, attention in enumerate(self.attentions):
+            self.add_module('attention_{}'.format(i), attention)
+
+        self.out_att = GraphAttentionLayer(nhid * nheads, nclass, dropout=dropout, alpha=alpha, concat=False)
+
+    def forward(self, x, adj):
+        x = F.dropout(x, self.dropout, training=self.training)
+        x = torch.cat([att(x, adj) for att in self.attentions], dim=1)
+        x = F.dropout(x, self.dropout, training=self.training)
+        x = F.elu(self.out_att(x, adj))
+        return F.log_softmax(x, dim=1)
+
+
+class SpGAT(nn.Module):
+    def __init__(self, nfeat, nhid, nclass, dropout, alpha, nheads):
+        """Sparse version of GAT."""
+        super(SpGAT, self).__init__()
+        self.dropout = dropout
+
+        self.attentions = [SpGraphAttentionLayer(nfeat, 
+                                                 nhid, 
+                                                 dropout=dropout, 
+                                                 alpha=alpha, 
+                                                 concat=True) for _ in range(nheads)]
+        for i, attention in enumerate(self.attentions):
+            self.add_module('attention_{}'.format(i), attention)
+
+        self.out_att = SpGraphAttentionLayer(nhid * nheads, 
+                                             nclass, 
+                                             dropout=dropout, 
+                                             alpha=alpha, 
+                                             concat=False)
+
+    def forward(self, x, adj):
+        x = F.dropout(x, self.dropout, training=self.training)
+        x = torch.cat([att(x, adj) for att in self.attentions], dim=1)
+        x = F.dropout(x, self.dropout, training=self.training)
+        x = F.elu(self.out_att(x, adj))
+        return F.log_softmax(x, dim=1)
+
+
+File Path: train.py
+Content:
+from __future__ import division
+from __future__ import print_function
+
+import os
+import glob
+import time
+import random
+import argparse
+import numpy as np
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import torch.optim as optim
+from torch.autograd import Variable
+
+from utils import load_data, accuracy
+from models import GAT, SpGAT
+
+# Training settings
+parser = argparse.ArgumentParser()
+parser.add_argument('--no-cuda', action='store_true', default=False, help='Disables CUDA training.')
+parser.add_argument('--fastmode', action='store_true', default=False, help='Validate during training pass.')
+parser.add_argument('--sparse', action='store_true', default=False, help='GAT with sparse version or not.')
+parser.add_argument('--seed', type=int, default=72, help='Random seed.')
+parser.add_argument('--epochs', type=int, default=10000, help='Number of epochs to train.')
+parser.add_argument('--lr', type=float, default=0.005, help='Initial learning rate.')
+parser.add_argument('--weight_decay', type=float, default=5e-4, help='Weight decay (L2 loss on parameters).')
+parser.add_argument('--hidden', type=int, default=8, help='Number of hidden units.')
+parser.add_argument('--nb_heads', type=int, default=8, help='Number of head attentions.')
+parser.add_argument('--dropout', type=float, default=0.6, help='Dropout rate (1 - keep probability).')
+parser.add_argument('--alpha', type=float, default=0.2, help='Alpha for the leaky_relu.')
+parser.add_argument('--patience', type=int, default=100, help='Patience')
+
+args = parser.parse_args()
+args.cuda = not args.no_cuda and torch.cuda.is_available()
+
+random.seed(args.seed)
+np.random.seed(args.seed)
+torch.manual_seed(args.seed)
+if args.cuda:
+    torch.cuda.manual_seed(args.seed)
+
+# Load data
+adj, features, labels, idx_train, idx_val, idx_test = load_data()
+
+# Model and optimizer
+if args.sparse:
+    model = SpGAT(nfeat=features.shape[1], 
+                nhid=args.hidden, 
+                nclass=int(labels.max()) + 1, 
+                dropout=args.dropout, 
+                nheads=args.nb_heads, 
+                alpha=args.alpha)
+else:
+    model = GAT(nfeat=features.shape[1], 
+                nhid=args.hidden, 
+                nclass=int(labels.max()) + 1, 
+                dropout=args.dropout, 
+                nheads=args.nb_heads, 
+                alpha=args.alpha)
+optimizer = optim.Adam(model.parameters(), 
+                       lr=args.lr, 
+                       weight_decay=args.weight_decay)
+
+if args.cuda:
+    model.cuda()
+    features = features.cuda()
+    adj = adj.cuda()
+    labels = labels.cuda()
+    idx_train = idx_train.cuda()
+    idx_val = idx_val.cuda()
+    idx_test = idx_test.cuda()
+
+features, adj, labels = Variable(features), Variable(adj), Variable(labels)
+
+
+def train(epoch):
+    t = time.time()
+    model.train()
+    optimizer.zero_grad()
+    output = model(features, adj)
+    loss_train = F.nll_loss(output[idx_train], labels[idx_train])
+    acc_train = accuracy(output[idx_train], labels[idx_train])
+    loss_train.backward()
+    optimizer.step()
+
+    if not args.fastmode:
+        # Evaluate validation set performance separately,
+        # deactivates dropout during validation run.
+        model.eval()
+        output = model(features, adj)
+
+    loss_val = F.nll_loss(output[idx_val], labels[idx_val])
+    acc_val = accuracy(output[idx_val], labels[idx_val])
+    print('Epoch: {:04d}'.format(epoch+1),
+          'loss_train: {:.4f}'.format(loss_train.data.item()),
+          'acc_train: {:.4f}'.format(acc_train.data.item()),
+          'loss_val: {:.4f}'.format(loss_val.data.item()),
+          'acc_val: {:.4f}'.format(acc_val.data.item()),
+          'time: {:.4f}s'.format(time.time() - t))
+
+    return loss_val.data.item()
+
+
+def compute_test():
+    model.eval()
+    output = model(features, adj)
+    loss_test = F.nll_loss(output[idx_test], labels[idx_test])
+    acc_test = accuracy(output[idx_test], labels[idx_test])
+    print("Test set results:",
+          "loss= {:.4f}".format(loss_test.data.item()),
+          "accuracy= {:.4f}".format(acc_test.data.item()))
+
+# Train model
+t_total = time.time()
+loss_values = []
+bad_counter = 0
+best = args.epochs + 1
+best_epoch = 0
+for epoch in range(args.epochs):
+    loss_values.append(train(epoch))
+
+    torch.save(model.state_dict(), '{}.pkl'.format(epoch))
+    if loss_values[-1] < best:
+        best = loss_values[-1]
+        best_epoch = epoch
+        bad_counter = 0
+    else:
+        bad_counter += 1
+
+    if bad_counter == args.patience:
+        break
+
+    files = glob.glob('*.pkl')
+    for file in files:
+        epoch_nb = int(file.split('.')[0])
+        if epoch_nb < best_epoch:
+            os.remove(file)
+
+files = glob.glob('*.pkl')
+for file in files:
+    epoch_nb = int(file.split('.')[0])
+    if epoch_nb > best_epoch:
+        os.remove(file)
+
+print("Optimization Finished!")
+print("Total time elapsed: {:.4f}s".format(time.time() - t_total))
+
+# Restore best model
+print('Loading {}th epoch'.format(best_epoch))
+model.load_state_dict(torch.load('{}.pkl'.format(best_epoch)))
+
+# Testing
+compute_test()
+
+File Path: utils.py
+Content:
+import numpy as np
+import scipy.sparse as sp
+import torch
+
+
+def encode_onehot(labels):
+    # The classes must be sorted before encoding to enable static class encoding.
+    # In other words, make sure the first class always maps to index 0.
+    classes = sorted(list(set(labels)))
+    classes_dict = {c: np.identity(len(classes))[i, :] for i, c in enumerate(classes)}
+    labels_onehot = np.array(list(map(classes_dict.get, labels)), dtype=np.int32)
+    return labels_onehot
+
+
+def load_data(path="./data/cora/", dataset="cora"):
+    """Load citation network dataset (cora only for now)"""
+    print('Loading {} dataset...'.format(dataset))
+
+    idx_features_labels = np.genfromtxt("{}{}.content".format(path, dataset), dtype=np.dtype(str))
+    features = sp.csr_matrix(idx_features_labels[:, 1:-1], dtype=np.float32)
+    labels = encode_onehot(idx_features_labels[:, -1])
+
+    # build graph
+    idx = np.array(idx_features_labels[:, 0], dtype=np.int32)
+    idx_map = {j: i for i, j in enumerate(idx)}
+    edges_unordered = np.genfromtxt("{}{}.cites".format(path, dataset), dtype=np.int32)
+    edges = np.array(list(map(idx_map.get, edges_unordered.flatten())), dtype=np.int32).reshape(edges_unordered.shape)
+    adj = sp.coo_matrix((np.ones(edges.shape[0]), (edges[:, 0], edges[:, 1])), shape=(labels.shape[0], labels.shape[0]), dtype=np.float32)
+
+    # build symmetric adjacency matrix
+    adj = adj + adj.T.multiply(adj.T > adj) - adj.multiply(adj.T > adj)
+
+    features = normalize_features(features)
+    adj = normalize_adj(adj + sp.eye(adj.shape[0]))
+
+    idx_train = range(140)
+    idx_val = range(200, 500)
+    idx_test = range(500, 1500)
+
+    adj = torch.FloatTensor(np.array(adj.todense()))
+    features = torch.FloatTensor(np.array(features.todense()))
+    labels = torch.LongTensor(np.where(labels)[1])
+
+    idx_train = torch.LongTensor(idx_train)
+    idx_val = torch.LongTensor(idx_val)
+    idx_test = torch.LongTensor(idx_test)
+
+    return adj, features, labels, idx_train, idx_val, idx_test
+
+
+def normalize_adj(mx):
+    """Row-normalize sparse matrix"""
+    rowsum = np.array(mx.sum(1))
+    r_inv_sqrt = np.power(rowsum, -0.5).flatten()
+    r_inv_sqrt[np.isinf(r_inv_sqrt)] = 0.
+    r_mat_inv_sqrt = sp.diags(r_inv_sqrt)
+    return mx.dot(r_mat_inv_sqrt).transpose().dot(r_mat_inv_sqrt)
+
+
+def normalize_features(mx):
+    """Row-normalize sparse matrix"""
+    rowsum = np.array(mx.sum(1))
+    r_inv = np.power(rowsum, -1).flatten()
+    r_inv[np.isinf(r_inv)] = 0.
+    r_mat_inv = sp.diags(r_inv)
+    mx = r_mat_inv.dot(mx)
+    return mx
+
+
+def accuracy(output, labels):
+    preds = output.max(1)[1].type_as(labels)
+    correct = preds.eq(labels).double()
+    correct = correct.sum()
+    return correct / len(labels)
+
+
+File Path: visualize_graph.py
+Content:
+from graphviz import Digraph
+
+import torch
+import models
+
+def make_dot(var, params):
+    """ Produces Graphviz representation of PyTorch autograd graph
+    
+    Blue nodes are the Variables that require grad, orange are Tensors
+    saved for backward in torch.autograd.Function
+    
+    Args:
+        var: output Variable
+        params: dict of (name, Variable) to add names to node that
+            require grad (TODO: make optional)
+    """
+    param_map = {id(v): k for k, v in params.items()}
+    print(param_map)
+    
+    node_attr = dict(style='filled',
+                     shape='box',
+                     align='left',
+                     fontsize='12',
+                     ranksep='0.1',
+                     height='0.2')
+    dot = Digraph(node_attr=node_attr, graph_attr=dict(size="12,12"))
+    seen = set()
+    
+    def size_to_str(size):
+        return '('+(', ').join(['%d'% v for v in size])+')'
+
+    def add_nodes(var):
+        if var not in seen:
+            if torch.is_tensor(var):
+                dot.node(str(id(var)), size_to_str(var.size()), fillcolor='orange')
+            elif hasattr(var, 'variable'):
+                u = var.variable
+                node_name = '%s\n %s' % (param_map.get(id(u)), size_to_str(u.size()))
+                dot.node(str(id(var)), node_name, fillcolor='lightblue')
+            else:
+                dot.node(str(id(var)), str(type(var).__name__))
+            seen.add(var)
+            if hasattr(var, 'next_functions'):
+                for u in var.next_functions:
+                    if u[0] is not None:
+                        dot.edge(str(id(u[0])), str(id(var)))
+                        add_nodes(u[0])
+            if hasattr(var, 'saved_tensors'):
+                for t in var.saved_tensors:
+                    dot.edge(str(id(t)), str(id(var)))
+                    add_nodes(t)
+    add_nodes(var.grad_fn)
+    return dot
+
+inputs = torch.randn(100, 50).cuda()
+adj = torch.randn(100, 100).cuda()
+model = models.SpGAT(50, 8, 7, 0.5, 0.01, 3)
+model = model.cuda()
+y = model(inputs, adj)
+
+g = make_dot(y, model.state_dict())
+g.view()
+
+Output:
+{
+    "experimental_code": "class GraphAttentionLayer(nn.Module):\n    \"\"\"\n    Simple GAT layer, similar to https://arxiv.org/abs/1710.10903\n    \"\"\"\n    def __init__(self, in_features, out_features, dropout, alpha, concat=True):\n        super(GraphAttentionLayer, self).__init__()\n        self.dropout = dropout\n        self.in_features = in_features\n        self.out_features = out_features\n        self.alpha = alpha\n        self.concat = concat\n\n        self.W = nn.Parameter(torch.empty(size=(in_features, out_features)))\n        nn.init.xavier_uniform_(self.W.data, gain=1.414)\n        self.a = nn.Parameter(torch.empty(size=(2*out_features, 1)))\n        nn.init.xavier_uniform_(self.a.data, gain=1.414)\n\n        self.leakyrelu = nn.LeakyReLU(self.alpha)\n\n    def forward(self, h, adj):\n        Wh = torch.mm(h, self.W) # h.shape: (N, in_features), Wh.shape: (N, out_features)\n        e = self._prepare_attentional_mechanism_input(Wh)\n\n        zero_vec = -9e15*torch.ones_like(e)\n        attention = torch.where(adj > 0, e, zero_vec)\n        attention = F.softmax(attention, dim=1)\n        attention = F.dropout(attention, self.dropout, training=self.training)\n        h_prime = torch.matmul(attention, Wh)\n\n        if self.concat:\n            return F.elu(h_prime)\n        else:\n            return h_prime\n\n    def _prepare_attentional_mechanism_input(self, Wh):\n        # Wh.shape (N, out_feature)\n        # self.a.shape (2 * out_feature, 1)\n        # Wh1&2.shape (N, 1)\n        # e.shape (N, N)\n        Wh1 = torch.matmul(Wh, self.a[:self.out_features, :])\n        Wh2 = torch.matmul(Wh, self.a[self.out_features:, :])\n        # broadcast add\n        e = Wh1 + Wh2.T\n        return self.leakyrelu(e)\n\n    def __repr__(self):\n        return self.__class__.__name__ + ' (' + str(self.in_features) + ' -> ' + str(self.out_features) + ')'\n\n\nclass SpecialSpmmFunction(torch.autograd.Function):\n    \"\"\"Special function for only sparse region backpropataion layer.\"\"\"\n    @staticmethod\n    def forward(ctx, indices, values, shape, b):\n        assert indices.requires_grad == False\n        a = torch.sparse_coo_tensor(indices, values, shape)\n        ctx.save_for_backward(a, b)\n        ctx.N = shape[0]\n        return torch.matmul(a, b)\n\n    @staticmethod\n    def backward(ctx, grad_output):\n        a, b = ctx.saved_tensors\n        grad_values = grad_b = None\n        if ctx.needs_input_grad[1]:\n            grad_a_dense = grad_output.matmul(b.t())\n            edge_idx = a._indices()[0, :] * ctx.N + a._indices()[1, :]\n            grad_values = grad_a_dense.view(-1)[edge_idx]\n        if ctx.needs_input_grad[3]:\n            grad_b = a.t().matmul(grad_output)\n        return None, grad_values, None, grad_b\n\n\nclass SpecialSpmm(nn.Module):\n    def forward(self, indices, values, shape, b):\n        return SpecialSpmmFunction.apply(indices, values, shape, b)\n\n    \nclass SpGraphAttentionLayer(nn.Module):\n    \"\"\"\n    Sparse version GAT layer, similar to https://arxiv.org/abs/1710.10903\n    \"\"\"\n\n    def __init__(self, in_features, out_features, dropout, alpha, concat=True):\n        super(SpGraphAttentionLayer, self).__init__()\n        self.in_features = in_features\n        self.out_features = out_features\n        self.alpha = alpha\n        self.concat = concat\n\n        self.W = nn.Parameter(torch.zeros(size=(in_features, out_features)))\n        nn.init.xavier_normal_(self.W.data, gain=1.414)\n                \n        self.a = nn.Parameter(torch.zeros(size=(1, 2*out_features)))\n        nn.init.xavier_normal_(self.a.data, gain=1.414)\n\n        self.dropout = nn.Dropout(dropout)\n        self.leakyrelu = nn.LeakyReLU(self.alpha)\n        self.special_spmm = SpecialSpmm()\n\n    def forward(self, input, adj):\n        dv = 'cuda' if input.is_cuda else 'cpu'\n\n        N = input.size()[0]\n        edge = adj.nonzero().t()\n\n        h = torch.mm(input, self.W)\n        # h: N x out\n        assert not torch.isnan(h).any()\n\n        # Self-attention on the nodes - Shared attention mechanism\n        edge_h = torch.cat((h[edge[0, :], :], h[edge[1, :], :]), dim=1).t()\n        # edge: 2*D x E\n\n        edge_e = torch.exp(-self.leakyrelu(self.a.mm(edge_h).squeeze()))\n        assert not torch.isnan(edge_e).any()\n        # edge_e: E\n\n        e_rowsum = self.special_spmm(edge, edge_e, torch.Size([N, N]), torch.ones(size=(N,1), device=dv))\n        # e_rowsum: N x 1\n\n        edge_e = self.dropout(edge_e)\n        # edge_e: E\n\n        h_prime = self.special_spmm(edge, edge_e, torch.Size([N, N]), h)\n        assert not torch.isnan(h_prime).any()\n        # h_prime: N x out\n        \n        h_prime = h_prime.div(e_rowsum)\n        # h_prime: N x out\n        assert not torch.isnan(h_prime).any()\n\n        if self.concat:\n            # if this layer is not last layer,\n            return F.elu(h_prime)\n        else:\n            # if this layer is last layer,\n            return h_prime\n\n    def __repr__(self):\n        return self.__class__.__name__ + ' (' + str(self.in_features) + ' -> ' + str(self.out_features) + ')'",
+    "experimental_info": "The provided repository implements Graph Attention Network (GAT) layers, which are the subject of the method's proposed initialization. However, the specific balanced initialization scheme described in the method – including setting attention parameters to zero, scaling feature weights to satisfy a norm preservation law, and integrating LLortho initialization – is *not* present in the provided code.\n\nInstead, the `GraphAttentionLayer` utilizes `nn.init.xavier_uniform_` for both feature weights (`self.W`) and attention parameters (`self.a`). The `SpGraphAttentionLayer` (sparse version) utilizes `nn.init.xavier_normal_` for both `self.W` and `self.a`, despite `torch.zeros` being called initially, which is immediately overwritten by the Xavier initialization.\n\nGeneral experimental settings for training the GAT model (as found in `train.py`):\n-   **Model:** Either `GAT` or `SpGAT` based on `--sparse` argument.\n-   **Random Seed:** `72`\n-   **Epochs:** `10000` (with early stopping)\n-   **Learning Rate (lr):** `0.005`\n-   **Weight Decay (L2 loss):** `5e-4`\n-   **Hidden Units:** `8`\n-   **Number of Attention Heads:** `8`\n-   **Dropout Rate:** `0.6`\n-   **Leaky ReLU Alpha:** `0.2`\n-   **Optimizer:** Adam\n-   **Loss Function:** Negative Log Likelihood (NLL) Loss (`F.nll_loss`)\n-   **Early Stopping:** Patience of `100` epochs based on validation loss.\n-   **Dataset:** Cora dataset loaded from `./data/cora/`.\n-   **Data Splits:** Training (indices `0-139`), Validation (indices `200-499`), Test (indices `500-1499`).\n-   **Feature Normalization:** Row-wise normalization.\n-   **Adjacency Matrix Normalization:** Symmetric normalized adjacency matrix (`D^(-0.5) * A * D^(-0.5)`)."
+}
