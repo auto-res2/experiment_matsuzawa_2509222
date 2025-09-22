@@ -882,6 +882,11 @@
         "smoke_test_yaml": "# config/smoke_test.yaml\n# Small, quick-to-run configuration suitable for CI or local sanity checks\n\nseed: 42\nrun_name: smoke\n\n# dataset --------------------------------------------------------------------\ndataset: Cora\ndataset_root: ./data\n\n# model ----------------------------------------------------------------------\nnum_layers: 2\nhidden_dim: 32\nheads: 4\ndropout: 0.5\n\n# training -------------------------------------------------------------------\nepochs: 2\nbatch_size: 256\nlr: 0.005\nweight_decay: 0.0005\n\n# sampler (SHANS) ------------------------------------------------------------\nsampler: shans\nk_min: 2\nk_max: 10\n",
         "full_experiment_yaml": "# config/full_experiment.yaml\n# Full-scale configuration matching Experiment-1 (variance-aware budgeting)\n\nseed: 42\nrun_name: full\n\n# dataset --------------------------------------------------------------------\ndataset: ogbn-products\ndataset_root: ./data\n\n# model ----------------------------------------------------------------------\nnum_layers: 10\nhidden_dim: 128\nheads: 8\ndropout: 0.6\n\n# training -------------------------------------------------------------------\nepochs: 50\nbatch_size: 1024\nlr: 0.0025\nweight_decay: 0.0005\n\n# sampler (full SHANS) -------------------------------------------------------\nsampler: shans\nk_min: 2\nk_max: 25\n\n# SHANS additional params ----------------------------------------------------\nS: 64\ntheta_deg: 20\n"
       }
+    },
+    "experimental_results": {
+      "result": "{\n  \"val_accuracy\": 0.5299999713897705,\n  \"test_accuracy\": 0.5289999842643738\n}\n{\n  \"val_accuracy\": 0.19599999487400055,\n  \"test_accuracy\": 0.18000000715255737\n}",
+      "error": "warning: No `requires-python` value found in the workspace. Defaulting to `>=3.11`.\n/home/toma/pt-80-1-a-13/_work/experiment_matsuzawa_2509222/experiment_matsuzawa_2509222/.venv/lib/python3.11/site-packages/torch_geometric/sampler/neighbor_sampler.py:61: UserWarning: Using 'NeighborSampler' without a 'pyg-lib' installation is deprecated and will be removed soon. Please install 'pyg-lib' for accelerated neighborhood sampling\n  warnings.warn(f\"Using '{self.__class__.__name__}' without a \"\n/home/toma/pt-80-1-a-13/_work/experiment_matsuzawa_2509222/experiment_matsuzawa_2509222/.venv/lib/python3.11/site-packages/torch_geometric/sampler/neighbor_sampler.py:61: UserWarning: Using 'NeighborSampler' without a 'pyg-lib' installation is deprecated and will be removed soon. Please install 'pyg-lib' for accelerated neighborhood sampling\n  warnings.warn(f\"Using '{self.__class__.__name__}' without a \" )",
+      "image_file_name_list": []
     }
   },
   "idea_info_history": [
@@ -934,5 +939,6 @@
       }
     }
   ],
+  "executed_flag": true,
   "experiment_iteration": 1
 }
