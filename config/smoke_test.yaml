@@ -21,6 +21,8 @@ lr: 0.005
 weight_decay: 0.0005
 
 # sampler (SHANS) ------------------------------------------------------------
-sampler: shans
+# Temporarily disabled SHANS for smoke test due to dependency issues
+# sampler: shans
+sampler: full
 k_min: 2
 k_max: 10

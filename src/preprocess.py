@@ -21,9 +21,31 @@ def load_dataset(cfg: Dict[str, Any]):
         data = ds[0]
         return data
     elif name.lower() == "ogbn-products":
-        from torch_geometric.datasets import OGBNodePropPredDataset
+        import builtins
+        import torch
+        from ogb.nodeproppred import PygNodePropPredDataset
 
-        ds = OGBNodePropPredDataset(root=root, name="ogbn-products"); data = ds[0]
+        # Monkey patch input to automatically answer 'y' for non-interactive mode
+        original_input = builtins.input
+        def auto_confirm_input(prompt=""):
+            print(f"{prompt}y (auto-confirmed)")
+            return "y"
+        builtins.input = auto_confirm_input
+
+        # Monkey patch torch.load to handle weights_only issue
+        original_torch_load = torch.load
+        def patched_torch_load(f, *args, **kwargs):
+            # Set weights_only=False for compatibility with OGB datasets
+            kwargs['weights_only'] = False
+            return original_torch_load(f, *args, **kwargs)
+        torch.load = patched_torch_load
+
+        try:
+            ds = PygNodePropPredDataset(root=root, name="ogbn-products"); data = ds[0]
+        finally:
+            # Restore original functions
+            builtins.input = original_input
+            torch.load = original_torch_load
         # masks ----------------------------------------------------------------
         split_idx = ds.get_idx_split()
         data.train_mask = torch.zeros(data.num_nodes, dtype=torch.bool)

@@ -17,13 +17,22 @@ __all__ = ["evaluate"]
 
 @torch.no_grad()
 def evaluate(model: torch.nn.Module, data: Data, cfg: Dict[str, Any]) -> Dict[str, float]:
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    # Use same device logic as training for consistency
+    is_large_dataset = data.num_nodes > 100000
+    if is_large_dataset:
+        device = torch.device("cpu")
+    else:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.eval()
     model = model.to(device)
     out = model(data.x.to(device), data.edge_index.to(device))
     pred = out.argmax(dim=-1).cpu()
-    acc_val = (pred[data.val_mask] == data.y[data.val_mask]).float().mean().item()
-    acc_test = (pred[data.test_mask] == data.y[data.test_mask]).float().mean().item()
+    # Ensure masks and labels are on CPU for comparison with pred
+    val_mask_cpu = data.val_mask.cpu()
+    test_mask_cpu = data.test_mask.cpu()
+    y_cpu = data.y.cpu()
+    acc_val = (pred[val_mask_cpu] == y_cpu[val_mask_cpu]).float().mean().item()
+    acc_test = (pred[test_mask_cpu] == y_cpu[test_mask_cpu]).float().mean().item()
 
     results = {
         "val_accuracy": acc_val,

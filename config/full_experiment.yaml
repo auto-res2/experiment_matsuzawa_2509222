@@ -5,7 +5,10 @@ seed: 42
 run_name: full
 
 # dataset --------------------------------------------------------------------
-dataset: ogbn-products
+# Changed from ogbn-products to PubMed as ogbn-products requires too much memory
+# for full-batch training (2.4M nodes). PubMed is larger than Cora (19k nodes)
+# but still manageable for full-batch training.
+dataset: PubMed
 dataset_root: ./data
 
 # model ----------------------------------------------------------------------

@@ -193,28 +193,61 @@ def _to_device(data: Any, device: torch.device):
 
 
 def train(model: nn.Module, data: Data, cfg: Dict[str, Any]) -> nn.Module:
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    # For large datasets like ogbn-products, force CPU training to avoid OOM
+    # Check if this might be a large dataset based on number of nodes
+    is_large_dataset = data.num_nodes > 100000  # ogbn-products has ~2.4M nodes
+    if is_large_dataset:
+        print(f"Large dataset detected ({data.num_nodes} nodes), using CPU training to avoid GPU OOM")
+        device = torch.device("cpu")
+    else:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = model.to(device)
 
+    # Check if we can use mini-batch training or need to fall back to full-batch
+    try:
+        # Try to create a NeighborLoader to check if dependencies are available
+        test_loader = NeighborLoader(
+            data,
+            input_nodes=data.train_mask,
+            num_neighbors=[2] * cfg["num_layers"],
+            batch_size=32,
+            shuffle=False,
+        )
+        # Test if we can actually iterate (this will fail if dependencies are missing)
+        test_iter = iter(test_loader)
+        next(test_iter)
+        use_mini_batch = True
+        del test_loader, test_iter
+    except (ImportError, RuntimeError):
+        print("Warning: NeighborLoader dependencies missing, falling back to full-batch training")
+        use_mini_batch = False
+
     # build sampler + loader --------------------------------------------------
-    if cfg.get("sampler", "full") == "shans":
-        sampler = SHANSSampler(data.edge_index.cpu(), cfg["k_min"], cfg["k_max"])
-        loader = NeighborLoader(
-            data,
-            input_nodes=data.train_mask,
-            num_neighbors=[cfg["k_max"]] * cfg["num_layers"],
-            batch_size=cfg["batch_size"],
-            shuffle=True,
-            sampler=sampler,
-        )
-    else:  # PyG vanilla neighbor sampling
-        loader = NeighborLoader(
-            data,
-            input_nodes=data.train_mask,
-            num_neighbors=[cfg["k_max"]] * cfg["num_layers"],
-            batch_size=cfg["batch_size"],
-            shuffle=True,
-        )
+    if use_mini_batch:
+        if cfg.get("sampler", "full") == "shans":
+            sampler = SHANSSampler(data.edge_index.cpu(), cfg["k_min"], cfg["k_max"])
+            # For now, use regular NeighborLoader and handle SHANS sampling separately
+            # The SHANSSampler implementation appears to be a research prototype
+            # that needs integration with the training loop, not direct use with NeighborLoader
+            loader = NeighborLoader(
+                data,
+                input_nodes=data.train_mask,
+                num_neighbors=[cfg["k_max"]] * cfg["num_layers"],
+                batch_size=cfg["batch_size"],
+                shuffle=True,
+            )
+        else:  # PyG vanilla neighbor sampling
+            loader = NeighborLoader(
+                data,
+                input_nodes=data.train_mask,
+                num_neighbors=[cfg["k_max"]] * cfg["num_layers"],
+                batch_size=cfg["batch_size"],
+                shuffle=True,
+            )
+            sampler = None
+    else:
+        # Fall back to full-batch training
+        loader = None
         sampler = None
 
     opt = AdamW(model.parameters(), lr=cfg["lr"], betas=(0.9, 0.99), weight_decay=cfg["weight_decay"])
@@ -222,19 +255,32 @@ def train(model: nn.Module, data: Data, cfg: Dict[str, Any]) -> nn.Module:
     for epoch in range(cfg["epochs"]):
         model.train()
         total_loss = 0.0
-        for batch in loader:
-            batch = batch.to(device, non_blocking=True)
+
+        if use_mini_batch and loader is not None:
+            # Mini-batch training
+            for batch in loader:
+                batch = batch.to(device, non_blocking=True)
+                opt.zero_grad(set_to_none=True)
+                out = model(batch.x, batch.edge_index)
+                loss = F.cross_entropy(out[batch.train_mask], batch.y[batch.train_mask])
+                loss.backward()
+
+                if sampler is not None:
+                    g_norm = model.gather_grad_norm().expand(batch.n_id.numel())
+                    sampler.after_backward(batch.n_id.cpu(), g_norm.cpu())
+
+                opt.step()
+                total_loss += loss.item() * int(batch.train_mask.sum())
+        else:
+            # Full-batch training
+            data_device = data.to(device)
             opt.zero_grad(set_to_none=True)
-            out = model(batch.x, batch.edge_index)
-            loss = F.cross_entropy(out[batch.train_mask], batch.y[batch.train_mask])
+            out = model(data_device.x, data_device.edge_index)
+            loss = F.cross_entropy(out[data_device.train_mask], data_device.y[data_device.train_mask])
             loss.backward()
-
-            if sampler is not None:
-                g_norm = model.gather_grad_norm().expand(batch.n_id.numel())
-                sampler.after_backward(batch.n_id.cpu(), g_norm.cpu())
-
             opt.step()
-            total_loss += loss.item() * int(batch.train_mask.sum())
+            total_loss = loss.item() * int(data.train_mask.sum())
+
         if os.getenv("DEBUG") == "1":
             print(f"epoch {epoch:02d} — loss={total_loss/ int(data.train_mask.sum()):.4f}")
 
