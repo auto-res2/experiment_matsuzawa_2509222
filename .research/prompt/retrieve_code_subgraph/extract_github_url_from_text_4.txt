@@ -1,0 +1,17 @@
+
+Input:
+# Task
+You carefully read the contents of the “Paper Outline” and select one GitHub link from the “GitHub URLs List” that you think is most relevant to the contents.
+# Constraints
+- Output the index number corresponding to the selected GitHub URL.
+- Be sure to select only one GitHub URL.
+- If there is no related GitHub link, output None.
+# Paper Outline
+GACT's methodology is founded on a general theoretical framework for ACT. It first analyzes a linearized version of ACT's stochastic gradient (SG), proving that it is an unbiased estimator, and that the linearization error is bounded by the compression error. The variance of this linearized gradient has a simple structure, separating sampling variance from compression variance. An adaptive algorithm is then employed to determine the compression ratio for each tensor. This algorithm numerically estimates the sensitivity (cl) of each context tensor by evaluating the empirical variance of the gradient, keeping random seeds fixed for all compressors except the target tensor. Based on these sensitivities and a total bit budget, an integer programming problem is approximately solved using an O(Llog2L) greedy algorithm to select the optimal per-tensor compression strategy. The implementation is a lightweight PyTorch library that uses low-level PyTorch hooks to capture context tensors, supports arbitrary operators, filters out non-activation tensors, avoids duplication via tensor footprints, and integrates parallel swapping/prefetching and gradient checkpointing.
+
+# GitHub URLs List
+['https://github.com/LiuXiaoxuanPKU/GACT-ICML']
+Output:
+{
+    "index": 0
+}
