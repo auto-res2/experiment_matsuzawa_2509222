@@ -5,7 +5,7 @@ from pathlib import Path
 import yaml
 
 from .train import train_one_run
-from .evaluate_py import evaluate
+from .evaluate import evaluate
 
 # ----------------------------------------------------------------------------
 CONFIG_DIR = Path(__file__).resolve().parent.parent / "config"

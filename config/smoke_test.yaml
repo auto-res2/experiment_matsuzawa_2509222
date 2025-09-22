@@ -1,6 +1,6 @@
 experiment_name: smoke_test
 model: hashpipe
-dataset: Reddit
+dataset: Cora
 hidden: 64
 num_layers: 2
 heads: 4

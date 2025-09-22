@@ -13,6 +13,25 @@ from torch_geometric.nn import GATConv
 from .preprocess import load_data
 
 # ------------------ HASHPIPE core -------------------------------------------------
+
+def _bit_count(x: Tensor) -> Tensor:
+    """Compute bit count for each element, compatible with older PyTorch versions."""
+    # Use builtin method if available (PyTorch >= 2.1)
+    if hasattr(x, 'bit_count'):
+        return x.bit_count()
+
+    # Fast fallback using bit manipulation tricks for 32-bit integers
+    # This is much faster than bit-by-bit counting
+    temp = x.clone().long()
+
+    # Use bit manipulation to count bits in parallel
+    temp = temp - ((temp >> 1) & 0x55555555)
+    temp = (temp & 0x33333333) + ((temp >> 2) & 0x33333333)
+    temp = (temp + (temp >> 4)) & 0x0F0F0F0F
+    temp = temp + (temp >> 8)
+    temp = temp + (temp >> 16)
+
+    return temp & 0x3F
 class HashPipeFilter(nn.Module):
     """Multi-resolution SimHash + Progressive Top-K Cache as described in the paper.
     The module is kept self-contained so it can be plugged into any GNN layer that
@@ -54,32 +73,58 @@ class HashPipeFilter(nn.Module):
 
         mask = torch.zeros_like(col, dtype=torch.bool, device=device)
 
-        # ---------------- Stage-1 : 16-bit SimHash --------------------------
-        hq16 = self._view_as_uint(q[row][:, :16]).sum(-1).to(torch.int32)
-        hk16 = self._view_as_uint(k[col][:, :16]).sum(-1).to(torch.int32)
-        cand = (hq16 ^ hk16).bit_count() <= self.t16
+        # Process edges in batches to avoid memory overflow
+        batch_size = min(10000, row.size(0))  # Process max 10k edges at once to save memory
+        num_batches = (row.size(0) + batch_size - 1) // batch_size
 
-        # ---------------- Stage-2 : 32-bit SimHash --------------------------
-        if cand.any():
+        for batch_idx in range(num_batches):
+            start_idx = batch_idx * batch_size
+            end_idx = min((batch_idx + 1) * batch_size, row.size(0))
+
+            batch_row = row[start_idx:end_idx]
+            batch_col = col[start_idx:end_idx]
+
+            # ---------------- Stage-1 : 16-bit SimHash --------------------------
+            hq16 = self._view_as_uint(q[batch_row][:, :16]).sum(-1).to(torch.int32)
+            hk16 = self._view_as_uint(k[batch_col][:, :16]).sum(-1).to(torch.int32)
+            cand = _bit_count(hq16 ^ hk16) <= self.t16
+
+            # ---------------- Stage-2 : 32-bit SimHash --------------------------
+            if cand.any():
+                idx = cand.nonzero(as_tuple=False).squeeze()
+                if idx.dim() == 0:
+                    idx = idx.unsqueeze(0)
+                hq32 = self._view_as_uint(q[batch_row[idx]][:, :32]).sum(-1).to(torch.int32)
+                hk32 = self._view_as_uint(k[batch_col[idx]][:, :32]).sum(-1).to(torch.int32)
+                cand[idx] &= _bit_count(hq32 ^ hk32) <= self.t32
+
+            # ---------------- Stage-3 : 64-bit SimHash --------------------------
             idx = cand.nonzero(as_tuple=False).squeeze()
-            hq32 = self._view_as_uint(q[row[idx]][:, :32]).sum(-1).to(torch.int32)
-            hk32 = self._view_as_uint(k[col[idx]][:, :32]).sum(-1).to(torch.int32)
-            cand[idx] &= (hq32 ^ hk32).bit_count() <= self.t32
+            if idx.numel() > 0:
+                if idx.dim() == 0:
+                    idx = idx.unsqueeze(0)
+                hq64 = self._view_as_uint(q[batch_row[idx]]).sum(-1).to(torch.int64)
+                hk64 = self._view_as_uint(k[batch_col[idx]]).sum(-1).to(torch.int64)
+                cand[idx] &= _bit_count(hq64 ^ hk64) <= self.t64
 
-        # ---------------- Stage-3 : 64-bit SimHash --------------------------
-        idx = cand.nonzero(as_tuple=False).squeeze()
-        if idx.numel() > 0:
-            hq64 = self._view_as_uint(q[row[idx]]).sum(-1).to(torch.int64)
-            hk64 = self._view_as_uint(k[col[idx]]).sum(-1).to(torch.int64)
-            cand[idx] &= (hq64 ^ hk64).bit_count() <= self.t64
-
-        mask |= cand.to(device)
+            mask[start_idx:end_idx] |= cand.to(device)
+            # Clear memory after each batch to prevent buildup
+            del hq16, hk16, cand
+            if 'hq32' in locals():
+                del hq32, hk32
+            if 'hq64' in locals():
+                del hq64, hk64
+            torch.cuda.empty_cache()
 
         # ---------------- Union with Historical Cache -----------------------
-        for i in range(row.numel()):
-            src = row[i].item()
-            if self._cache[src].numel():
-                mask[i] |= (col[i] in self._cache[src])
+        # Process cache in batches too to avoid memory issues
+        for batch_idx in range(num_batches):
+            start_idx = batch_idx * batch_size
+            end_idx = min((batch_idx + 1) * batch_size, row.size(0))
+            for i in range(start_idx, end_idx):
+                src = row[i].item()
+                if self._cache[src].numel():
+                    mask[i] |= (col[i] in self._cache[src])
 
         return mask
 
@@ -109,9 +154,14 @@ class GATWithHashPipe(nn.Module):
 
         in_channels = num_features
         for i in range(num_layers):
-            out_channels = hidden if i < num_layers - 1 else num_classes
-            self.layers.append(GATConv(in_channels, out_channels // heads, heads=heads, dropout=0.6))
-            in_channels = out_channels
+            if i < num_layers - 1:
+                out_channels = hidden
+                self.layers.append(GATConv(in_channels, out_channels // heads, heads=heads, dropout=0.6))
+                in_channels = out_channels
+            else:
+                # Final layer should output num_classes directly
+                self.layers.append(GATConv(in_channels, num_classes, heads=1, dropout=0.6))
+                in_channels = num_classes
 
     # ---------------------------------------------------------------------
     def forward(self, data):  # data is a torch_geometric.data.Data object
@@ -173,6 +223,10 @@ def train_one_run(config: Dict) -> Dict:
         scaler.scale(loss).backward()
         scaler.step(optimiser)
         scaler.update()
+
+        # Clear GPU memory after each step
+        del out, loss
+        torch.cuda.empty_cache()
 
         # Evaluation
         model.eval()

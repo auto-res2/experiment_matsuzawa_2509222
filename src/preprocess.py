@@ -3,6 +3,7 @@ from functools import lru_cache
 from typing import Literal
 
 import torch
+import torch_geometric.data
 from torch_geometric.datasets import Reddit, Planetoid
 from torch_geometric.transforms import NormalizeFeatures
 
