@@ -1,0 +1,269 @@
+
+Input:
+
+# Instructions
+You are a scientific research consistency evaluator. Your task is to evaluate the consistency and coherence of experimental results to determine if they can support meaningful scientific claims.
+
+## Scope Constraints
+- Focus ONLY on evaluating consistency between the proposed method and experimental results
+- Do not suggest infrastructure changes (Docker, lock files, etc.)
+- Do not recommend development/testing procedures (unit tests, synthetic graphs, etc.)
+- Do not suggest implementation details or code improvements
+- Do not recommend data release or reproducibility practices
+- Do not require or suggest experiments on actual hardware (e.g., real edge devices, physical deployment)
+- Evaluate only: method-result alignment, experimental design adequacy, result interpretation validity, and statistical rigor within computational/simulation contexts
+
+Based on your analysis, provide:
+1. `consistency_feedback` (str): Detailed feedback explaining the consistency evaluation and suggestions for improvement
+2. `consistency_score` (int): A score from 1-10 indicating the quality and consistency of the experimental design and results
+
+## Evaluation Criteria
+
+### consistency_feedback (str)
+Provide specific feedback focused on **scientific consistency evaluation** and **clearly categorize the source of any issues**:
+
+**Problem Categorization - Identify which area(s) need improvement:**
+
+1. **Experimental Strategy Issues** (Strategy/Details problems):
+   - Evaluate if the experimental strategy is fundamentally sound for validating the proposed method
+   - Assess whether the experimental details provide adequate scope and rigor
+   - Identify if the chosen metrics, baselines, or evaluation approach are appropriate
+
+2. **Implementation Issues** (Generated Files problems):
+   - Assess whether the generated code correctly implements the described experimental strategy
+   - Identify gaps between what the strategy specifies and what the code actually does
+   - Point out if the implementation fails to follow the experimental details
+
+3. **Strategy-Implementation Alignment Issues**:
+   - Evaluate consistency between experimental strategy/details and the generated implementation
+   - Identify cases where both strategy and implementation may be individually reasonable but misaligned
+
+4. **Result Interpretation Issues**:
+   - Assess alignment between claimed method and actual experimental results
+   - Identify gaps between theoretical claims and empirical evidence
+   - Point out contradictions between expected and observed outcomes
+
+**For each identified issue, clearly specify:**
+- Which category the problem falls into
+- What specific aspect needs improvement
+- Whether the issue is in planning (Strategy/Details) or execution (Generated Files) or both
+
+### consistency_score (int)
+Provide a numerical score (1-10) based on:
+- **8-10**: Excellent experimental design with clear, reliable results
+- **6-7**: Good experimental design with minor issues or room for improvement
+- **4-5**: Adequate experimental design but with concerns that need addressing
+- **1-3**: Poor experimental design with major flaws that undermine the conclusions
+
+## Current Method and Results:
+**Method:** {
+    "Open Problems": "•  Extremely high-degree hubs (10⁵-10⁶ edges) still trigger O(d) hashing every epoch even in HiPPO-GAT; the same neighbours are rescored thousands of times.\n•  No guarantee that probabilistic filters keep the true Top-T attentive edges – risk of accumulating bias.\n•  Edge-level attention patterns are highly correlated across epochs and adjacent layers, yet existing work repeatedly recomputes them.\n•  Current efficient-attention kernels ignore temporal redundancy and offer no way to trade accuracy for additional re-use.\n•  Need an attention accelerator whose cost is (i) sub-log-degree on average, (ii) amortised across training steps, and (iii) equipped with explicit (ε,δ) accuracy guarantees.",
+    "Methods": "We propose HASHPIPE-GAT:  Historical-cache And Sketch Hierarchy for Pipelined Probabilistic Edge selection.\nA. Epoch-wise Progressive Top-K Cache (PTKC)\n   • Every node keeps a tiny FIFO cache C_v (│C│≈8–32) storing the neighbours that attained the largest soft-attention weights in the previous epoch (running EMA).\n   • During the next forward pass we directly reuse C_v – no hashing, no dot-products – and only search additional L new candidates if |C_v|<T.\n   • Cache update is asynchronous and GPU-free (edge indices only).\nB. Multi-Resolution SimHash Filter\n   • Three successive 16/32/64-bit SimHash stages.  After each stage we early-reject edges whose Hamming distance >τ_l, shrinking the candidate pool geometrically; on A100 this is fully warp-math-pipe-lined.\nC. CountSketch Dot-Product Estimator\n   • For the remaining edges we approximate Q·K via a signed CountSketch with s=32 dimensions computed by fast Hadamard transform (O(s) instead of O(d_h)).\n   • Theorem:  with s≥(3/ε²)log(2/δ) the estimator is (ε,δ)-relative-error for any fixed pair (proof adapts Clarkson & Woodruff 2013).\nD. Layer-Shared Edge Memoisation\n   • Within the same mini-batch we memoise (v,u, QᵀK̂) tuples and reuse them across all H attention heads of the layer, avoiding redundant fetches of K_u.\nE. Lightweight Structural Sparsity\n   • 2:4 weight sparsity with magnitude-guided regrowth every 5 epochs keeps >70 % zeros while recovering 99 % accuracy (dense fine-tune ≤2 epochs).\nF. Activation Compression\n   • Plug-in GACT (level L2, adaptive 3-bit) around each layer – unchanged from HiPPO.\n\nOverall per-node cost per epoch\n   expected O(|C_v| + log log d + T) ≪ log d for practical degrees because PTKC hits >90 % of future Top-T edges on hubs.\nPython-only: uses torch.bitwise_* + torch.fft.hadamard for sketches and a 256-thread CUDA kernel via torch.autograd.Function for the early-reject pipeline.",
+    "Experimental Setup": "Datasets:  Reddit, OGB-Arxiv, OGB-Products (full), OGB-Papers100M, Friendster, uk-2005 (1.0 B edges, evaluation only).\nModels:  (1) vanilla GATv2-6L-256H, (2) HiPPO-GAT, (3) HASHPIPE-GAT (ours).\nHyper-parameters: T=32 retained edges, |C|=16, sketch dim s=32, τ values {4,8,12}.\nMetrics:  accuracy / ROC-AUC, epoch wall-clock, peak GPU memory, energy (nvidia-smi), cache-hit ratio, theoretical vs empirical ε.\nAblations:  –PTKC, –CountSketch (exact dot), single-res hash, cache size {0,4,8,16,32}, sparsity off.\nHardware: single A100-80GB; uk-2005 uses 8×A100 with DDP.",
+    "Experimental Code": "# fast multi-resolution hash + progressive cache\ndef hashpipe_filter(row, col, q, k, cache, T=32, s=32):\n    dev = q.device\n    keep = cache[row]  # cached neighbour ids (List[LongTensor])\n    mask = torch.zeros_like(col, dtype=torch.bool)\n    # Stage 1: 16-bit hash\n    hq16 = torch.view_as_uint(q[row][:,:16]).sum(-1)\n    hk16 = torch.view_as_uint(k[col][:,:16]).sum(-1)\n    cand = (hq16 ^ hk16).bit_count() <= 4\n    # Stage 2: 32-bit refine\n    if cand.sum():\n        idx = cand.nonzero(as_tuple=False).squeeze()\n        hq32 = torch.view_as_uint(q[row[idx]][:,:32]).sum(-1)\n        hk32 = torch.view_as_uint(k[col[idx]][:,:32]).sum(-1)\n        cand[idx] &= (hq32 ^ hk32).bit_count() <= 8\n    # Stage 3: 64-bit final filter\n    idx = cand.nonzero(as_tuple=False).squeeze()\n    if idx.numel():\n        hq64 = torch.view_as_uint(q[row[idx]]).sum(-1)\n        hk64 = torch.view_as_uint(k[col[idx]]).sum(-1)\n        cand[idx] &= (hq64 ^ hk64).bit_count() <= 12\n    # union with cache\n    mask |= cand\n    for i, nid in enumerate(row):\n        mask[i] |= (col[i] in keep[nid])\n    # CountSketch scores for ranking (optional exact top-T inside mask)\n    return mask",
+    "Expected Result": "• Products: 4.0 × speed-up vs vanilla GAT, 1.5 × vs HiPPO, +1.2 pp accuracy.\n• Papers100M 12-layer fits in 30 GB/GPU, 5.6× faster than GraphSAGE, accuracy parity.\n• uk-2005 evaluation: single epoch inference in 18 min on 8 GPUs (previously infeasible).\n• PTKC hit-rate: 93 % on nodes with deg>10 k → hashing cost drops to <7 % of total time after epoch 3.\n• Empirical sketch error ≤0.07 with s=32 matches theoretical bound.\n• Turning off cache slows training 1.8 ×; disabling CountSketch adds 12 % time.",
+    "Expected Conclusion": "HASHPIPE-GAT shows that combining historical edge caches with multi-resolution hashing and sketch-based dot-product approximation yields sub-logarithmic per-epoch complexity and concrete (ε,δ) guarantees, while retaining or improving accuracy.  Temporal re-use of attention patterns eliminates the last major bottleneck for hub nodes and enables full-batch attention on billion-edge graphs using commodity GPUs.  The techniques are orthogonal to future sparse tensor cores and can be layered on top of any GAT variant, opening a new direction: time-adaptive attention kernels for evolving graphs."
+}
+
+**Experimental Design:**
+- Strategy: 1. Full-Pipeline Benchmark on Real Datasets
+   Goal: Show that HASHPIPE-GAT delivers better speed/accuracy/memory than HiPPO-GAT and vanilla GAT under real workloads.
+   Procedure:
+     • Datasets: Reddit (150 K edges), OGB-Arxiv (1.1 M), OGB-Products (124 M), OGB-Papers100M (1 B), Friendster (1.8 B, inference only).
+     • Models: (i) GATv2-6L-256H, (ii) HiPPO-GAT (same width/depth), (iii) HASHPIPE-GAT.
+     • Train each for 30 epochs on a single A100 (Papers100M: 8×A100 with DDP). Use identical optimiser/lr schedule; tune τ values {4,8,12} once on Arxiv, reuse elsewhere.
+     • Metrics per epoch: validation accuracy/ROC-AUC, wall-clock time, peak GPU memory, energy (nvidia-smi pwr), cache-hit ratio, and percentage of hashing time.
+   What success looks like:
+     • ≥1.5× speed-up over HiPPO and ≥4× over vanilla on all datasets.
+     • Equal or +1 pp accuracy on Products & Papers100M.
+     • Memory ≤40 GB for 12-layer Papers100M; HiPPO exceeds 70 GB.
+     • Hashing <10 % of forward time after epoch 3, proving temporal reuse.
+   Demonstrates: real-world effectiveness, end-to-end efficiency and no accuracy loss.
+
+2. Guarantee-Validation Micro-study
+   Goal: Empirically verify the (ε,δ) error bound of CountSketch and the fidelity of Top-T edge selection.
+   Procedure:
+     • Synthetic graph with 3 M nodes, power-law degree up to 10⁶ so that exact attention scores fit in memory on A100 (use float16, batch-wise evaluation).
+     • For one frozen mini-batch, compute ground-truth Q·K and exact Top-T for every node.
+     • Run HASHPIPE-GAT with sketch dimensions s∈{16,32,48,64} and record:
+         – Relative error ‖QK̂−QK‖/‖QK‖ for each pair.
+         – Top-T recall (% of true Top-T edges kept after SimHash+cache).
+         – Probability that error>ε for ε∈{0.05,0.1}.
+     • Repeat over 100 random seeds to estimate δ.
+   What success looks like:
+     • Empirical P(error>ε) ≤δ where δ≈exp(−ε²s/3) matches theory.
+     • With s=32, median relative error ≤7 %, 95th-percentile ≤12 %.
+     • Top-T recall ≥95 % overall and ≥99 % for hubs (deg>10 k).
+   Demonstrates: the advertised (ε,δ) guarantees and that probabilistic filters do not drop important edges.
+
+3. Scalability & Hub-Stress Experiment
+   Goal: Prove sub-logarithmic amortised cost and cache efficacy when extremely high-degree hubs are present.
+   Procedure:
+     • Generate scale-free graphs with identical node count (10 M) but varying maximum degree: 10⁴, 10⁵, 10⁶.
+     • Instrument code to log (a) average number of hashed candidates; (b) per-node forward time; (c) PTKC hit-rate per epoch.
+     • Run 5 epochs each with HiPPO-GAT and HASHPIPE-GAT (no training, forward pass only) on a single A100.
+   What success looks like:
+     • HiPPO forward time grows ≈log d; HASHPIPE flattens after epoch 2, staying within ±15 % across the three graphs.
+     • For deg=10⁶, HASHPIPE processes hubs ≥8× faster than HiPPO by epoch 5.
+     • PTKC hit-rate rises to ≥92 % for hubs, confirming cost amortisation.
+   Demonstrates: sub-logarithmic complexity, effectiveness of historical cache, and robustness to extreme degree distributions.
+
+Collectively these three experiments validate HASHPIPE-GAT from orthogonal angles: (1) end-to-end gains on real tasks, (2) theoretical accuracy guarantees, and (3) scalability against worst-case degree profiles.
+- Details: ================ 1. FULL-PIPELINE BENCHMARK ON REAL DATASETS ================
+Goal: Demonstrate that HASHPIPE-GAT (HP-GAT) achieves superior speed/accuracy/memory compared with HiPPO-GAT (HH-GAT) and vanilla GATv2 under realistic training workloads.
+
+1.1  Models
+    Primary:  HASHPIPE-GAT (ours) – 6 layers, 256 hidden dim, 8 heads, ReLU, residual + layer-norm, dropout 0.4.
+    Baselines: (a) GATv2-6L-256H (identical macro-arch, dense attention) ; (b) HiPPO-GAT (official implementation, same width/depth) ; (c) GraphSAGE-mean-6L-256H* (cheap neighbourhood sampler, *included for memory-only comparison, excluded from accuracy leaderboard).
+    All models use identical classifier head (linear + log-softmax).
+
+1.2  Datasets & Pre-processing
+    • Reddit (232 K nodes / 11 M edges)       – original Train/Val/Test mask from GraphSAINT paper.
+    • OGB-Arxiv (169 K / 1.17 M)              – official OGB node split (year-based, 48/32/20 %).
+    • OGB-Products (2.45 M / 61.9 M)          – official OGB split; features ℓ₂-normalised.
+    • OGB-Papers100M (111 M / 1.6 B)          – official OGB split; node features FP16 row-wise quantised, edges stored CSR32.
+    • Friendster (65 M / 1.8 B)               – no labels; inference only on frozen weights (trained on Products) for memory/time evaluation.
+
+    Global preprocessing steps (executed once, cached to NVMe RAID-0):
+        1. Convert edge lists to CSR/CSC using torch-sparse; store 32-bit indices.
+        2. Feature quantisation: FP16 for hidden dim, FP32 for input layer of Reddit/Arxiv (to maximise accuracy).
+        3. For HP-GAT & HH-GAT create degree-sorted neighbour index to accelerate warp-coalesced scans.
+        4. Partition Papers100M and Friendster over 8 GPUs via METIS (edge-cut <0.07).  DDP uses NCCL-UCX.
+
+1.3  Data Split Strategy & Sampling
+    • Use public / OGB splits.  Zero additional random split → direct comparability.
+    • Mini-batch = full graph (i.e., full-batch training) except Papers100M which is trained with Cluster-GCN style 4 k-node sub-graphs (same clusters across methods).
+
+1.4  Optimiser & Hyper-parameters
+    AdamW( lr=3e-4, β=(0.9,0.999), weight_decay=1e-4 ).  Linear warm-up 2 epochs → cosine decay; batch-norm momentum 0.1.
+    HASHPIPE specific:
+        T = 32 retained edges; |C| = 16; sketch dim s = 32; SimHash thresholds τ ∈ {4,8,12}.  τ tuned on Arxiv (grid), then frozen.
+    Early stopping: stop if Val-Acc does not improve 10 epochs; otherwise run 30 epochs max.
+
+1.5  Seeds, Repeats & Aggregation
+    • Seeds: {1,2,3,4,5}.
+    • Report mean ± std of Test-Acc (primary) and wall-clock (secondary) over 5 seeds.
+    • “Best-val” selection: store checkpoint with highest Val-Acc per run, report corresponding Test.
+
+1.6  Metrics
+    Primary:  Node classification Accuracy (Reddit/Arxiv), ROC-AUC (Products/Papers100M).
+    Secondary: Wall-clock per epoch (min), Peak GPU memory (GB, nvprof), Energy (J, nvidia-smi –query-energy), PTKC hit-rate (%), Hashing-time fraction (%), FLOPs (fvcore flop-count), Training->Inference Memory Delta, Cost (AWS p4d.24x hourly*wall).
+
+1.7  Robustness & Ablations (integrated)
+    • Hyper-parameters: vary (T,|C|) ∈ {(16,8),(32,16),(48,24)} on Products; plot Accuracy vs Speed.
+    • Turn off PTKC or CountSketch individually.
+    • Gaussian feature noise σ∈{0,0.05,0.1} at inference; report AUC drop.
+    • OOD: evaluate Products-trained weights on Friendster features → measures domain transfer.
+
+1.8  FLOPs / Time / Memory Measurement
+    • fvcore.FlopCountAnalysis after torch.fx tracing (per-layer); sum across layers.
+    • Time: torch.cuda.Event + external timer covering data transfer.
+    • Memory: torch.cuda.max_memory_allocated().
+
+1.9  Example Launcher (Reddit)
+```
+python train.py  --model hashpipe  --dataset reddit  \
+       --hidden 256 --num_layers 6 --heads 8  --epochs 30 \
+       --T 32 --cache_size 16 --sketch 32 --tau 4 8 12 \
+       --lr 3e-4 --seed $SEED  --profile  --cuda 0
+```
+---------------------------------------------------------------------------
+
+=============== 2. GUARANTEE-VALIDATION MICRO-STUDY ===============
+Goal: Empirically verify (ε,δ) relative-error bound of CountSketch and recall of SimHash+PTKC.
+
+2.1  Graph Generation
+    • SyntheticPL-3M: 3 000 000 nodes, power-law exponent 2.2, max-deg 10⁶, 30 M edges.  Generated via torch_geometric.utils.barabasi_albert_graph then degree-inflate specific hubs.  Node features d=256 drawn N(0,1).
+    • Rationale: fits in A100-80 GB when storing full Q·K (float16) for one mini-batch.
+
+2.2  Experimental Procedure
+    Step-1 (Ground-truth): compute exact QK = Q·Kᵀ (256-d) via batched matmul; obtain Top-T=32 neighbours per node.
+    Step-2: run HP-GAT forward once with sketch s ∈ {16,32,48,64} and τ fixed (4,8,12).  Capture:
+        – Relative error e = ||QK̂−QK||₂ / ||QK||₂ per (v,u).
+        – Indicator I_top = 1 if (v,u) ∈ exact Top-T AND passed filter.
+    Step-3: repeat 100 seeds (new random sketches, same graph & Q,K).
+
+2.3  Evaluation Metrics
+    • P[e > ε] for ε ∈ {0.05,0.1}.  Compare to theory δ̂ = exp(−ε²s/3).
+    • Top-T recall R = Σ I_top / (N*T).
+    • Hub recall R_highdeg (deg >10 k).
+    • Kolmogorov-Smirnov distance between empirical and predicted error CDF.
+
+2.4  Repeats
+    Seeds = 100; report mean +95 % Clopper-Pearson interval.
+
+2.5  Robustness
+    • Vary sketch hash family: 4-wise vs 8-wise independent; show negligible change.
+
+2.6  Example Code Snippet
+```
+for s in [16,32,48,64]:
+    errs, hits = [], []
+    for seed in range(100):
+        torch.manual_seed(seed)
+        e, h = one_pass(s)
+        errs.append(e); hits.append(h)
+    print(s, np.mean(np.array(errs) > 0.05))
+```
+---------------------------------------------------------------------------
+
+=============== 3. SCALABILITY & HUB-STRESS EXPERIMENT ===============
+Goal: Verify sub-logarithmic cost & PTKC efficacy under extreme hub degrees.
+
+3.1  Graphs
+    ScaleFree-10M-deg{1e4,1e5,1e6}.  10 000 000 nodes each, identical power-law exponent 2.0 but hard cap on max-deg.
+
+3.2  Procedure
+    • Disable training; run 5 forward-only epochs with fixed Q,K.
+    • Instrument:
+         a) avg_hashed = mean_{nodes,epochs} |candidates after SimHash|,
+         b) avg_time_ms per node,
+         c) PTKC-hit-rate per epoch.
+    • Compare HP-GAT vs HiPPO-GAT.
+
+3.3  Metrics & Success Criteria
+    • Forward time vs log₂(max-deg) curve slope ≈0 for HP-GAT.
+    • Speedup_HP / HiPPO ≥8× at deg=10⁶ by epoch-5.
+
+3.4  Robustness
+    • Repeat with random deletion of 5 % high-weight edges; ensure PTKC hit-rate drop <3 p.p.
+
+3.5  Example Command
+```
+python stress.py --graph scale_free --max_deg 1e6 --epochs 5 --model hashpipe
+```
+---------------------------------------------------------------------------
+
+================ Cross-Experiment Shared Settings ================
+• Hardware: single NVIDIA A100-80GB unless noted; CUDA 12.2, PyTorch 2.1, Torch-Sparse 0.6.
+• Mixed Precision: torch.cuda.amp.autocast for all matmuls; CountSketch uses INT8 hashes + FP16 accumulators.
+• Determinism: cuDNN & NCCL deterministic flags, torch.use_deterministic_algorithms(True).
+
+================ Hyper-parameter Study Methodology ================
+Grid: lr ∈ {1e-3,3e-4,1e-4}; τ triplet ∈ {(4,8,12),(6,10,14)}, sketch s∈{16,32,48}.  Train 10-epoch sweeps on Arxiv; pick triple that maximises Val-Acc/time.  Report full grid in appendix.
+
+================ Cost, FLOPs & Memory Reporting ================
+• FLOPs: per epoch = Σ layer_flops; verify with nvprof –metrics flop_count_sp, flop_count_hp.
+• Cost: wall-clock × on-demand price (AWS p4d.24x $32/hr) + energy @ $0.12/kWh.
+• Memory: report maxima during fwd, bwd, optimiser-step separately.
+
+================ Failure Handling (NO-FALLBACK) ================
+If any dataset file missing → raise FileNotFoundError and terminate run.  No synthetic placeholder data will be silently substituted.
+
+
+- External Resources: {'hugging_face': {'models': [], 'datasets': [{'id': 'HuggingFaceGECLM/REDDIT_comments', 'author': 'HuggingFaceGECLM', 'sha': '54779d3d1f1c1b12e5989f695e13d38b394a558f', 'created_at': datetime.datetime(2023, 3, 15, 14, 14, 58, tzinfo=TzInfo(UTC)), 'last_modified': datetime.datetime(2023, 3, 17, 7, 52, 51, tzinfo=TzInfo(UTC)), 'private': False, 'gated': False, 'disabled': False, 'downloads': 3419, 'likes': 13, 'siblings': [{'rfilename': '.gitattributes', 'size': None, 'blob_id': None, 'lfs': None}, {'rfilename': 'README.md', 'size': None, 'blob_id': None, 'lfs': None}, {'rfilename': 'data/AskHistorians-00000-of-00005-7bc8c6a7ee105086.parquet', 'size': None, 'blob_id': None, 'lfs': None}, {'rfilename': 'data/AskHistorians-00001-of-00005-a4b2a36ae8eb6dde.parquet', 'size': None, 'blob_id': None, 'lfs': None}, {'rfilename': 'data/AskHistorians-00002-of-00005-f37b6800dc969287.parquet', 'size': None, 'blob_id': None, 'lfs': None}, {'rfilename': 'data/AskHistorians-00003-of-00005-330d2299e0da6dec.parquet', 'size': None, 'blob_id': None, 'lfs': None}, {'rfilename': 'data/AskHistorians-00004-of-00005-76c3eb5c7cde9f6f.parquet', 'size': None, 'blob_id': None, 'lfs': None}, {'rfilename': 'data/DIY-00000-of-00005-512b4731dec4f768.parquet', 'size': None, 'blob_id': None, 'lfs': None}, {'rfilename': 'data/DIY-00001-of-00005-dc205c62f6df1562.parquet', 'size': None, 'blob_id': None, 'lfs': None}, {'rfilename': 'data/DIY-00002-of-00005-843a8ff04871b6a7.parquet', 'size': None, 'blob_id': None, 'lfs': None}], 'card_data': {'license': [], 'language': ['en'], 'library_name': None, 'pipeline_tag': None, 'tags': ['reddit', 'social-media'], 'datasets': [], 'model_type': None, 'base_model': None, 'task_categories': ['text-generation'], 'size_categories': ['10B<n<100B'], 'metrics': [], 'widget': []}, 'tags': ['task_categories:text-generation', 'task_ids:dialogue-modeling', 'task_ids:language-modeling', 'annotations_creators:no-annotation', 'language_creators:found', 'multilinguality:monolingual', 'language:en', 'size_categories:100M<n<1B', 'format:parquet', 'modality:text', 'library:datasets', 'library:dask', 'library:mlcroissant', 'library:polars', 'arxiv:2001.08435', 'region:us', 'reddit', 'social-media'], 'pipeline_tag': None, 'library_name': None, 'readme': '---\ndataset_info:\n  features:\n  - name: archived\n    dtype: string\n  - name: author\n    dtype: string\n  - name: author_fullname\n    dtype: string\n  - name: body\n    dtype: string\n  - name: comment_type\n    dtype: string\n  - name: controversiality\n    dtype: string\n  - name: created_utc\n    dtype: string\n  - name: edited\n    dtype: string\n  - name: gilded\n    dtype: string\n  - name: id\n    dtype: string\n  - name: link_id\n    dtype: string\n  - name: locked\n    dtype: string\n  - name: name\n    dtype: string\n  - name: parent_id\n    dtype: string\n  - name: permalink\n    dtype: string\n  - name: retrieved_on\n    dtype: string\n  - name: score\n    dtype: string\n  - name: subreddit_id\n    dtype: string\n  - name: subreddit_name_prefixed\n    dtype: string\n  - name: subreddit_type\n    dtype: string\n  - name: total_awards_received\n    dtype: string\n  splits:\n  - name: programming\n    num_bytes: 3466623746\n    num_examples: 7503347\n  - name: tifu\n    num_bytes: 4761338653\n    num_examples: 12738669\n  - name: explainlikeimfive\n    num_bytes: 8451732573\n    num_examples: 16392814\n  - name: WritingPrompts\n    num_bytes: 4651591771\n    num_examples: 4436210\n  - name: changemyview\n    num_bytes: 8603031915\n    num_examples: 11600073\n  - name: LifeProTips\n    num_bytes: 5272994396\n    num_examples: 12829459\n  - name: todayilearned\n    num_bytes: 22655655241\n    num_examples: 60199778\n  - name: science\n    num_bytes: 7069809765\n    num_examples: 18112884\n  - name: askscience\n    num_bytes: 3144754665\n    num_examples: 6286702\n  - name: ifyoulikeblank\n    num_bytes: 547200329\n    num_examples: 1332211\n  - name: Foodforthought\n    num_bytes: 308377128\n    num_examples: 567900\n  - name: IWantToLearn\n    num_bytes: 408331672\n    num_examples: 745543\n  - name: bestof\n    num_bytes: 2003718831\n    num_examples: 4347522\n  - name: IAmA\n    num_bytes: 9380094090\n    num_examples: 25778822\n  - name: socialskills\n    num_bytes: 1000014402\n    num_examples: 1842733\n  - name: relationship_advice\n    num_bytes: 22298879735\n    num_examples: 38937398\n  - name: philosophy\n    num_bytes: 1494947876\n    num_examples: 2391695\n  - name: YouShouldKnow\n    num_bytes: 1165617658\n    num_examples: 2639265\n  - name: history\n    num_bytes: 1457852402\n    num_examples: 2962043\n  - name: books\n    num_bytes: 4562689426\n    num_examples: 10187495\n  - name: Showerthoughts\n    num_bytes: 13259109532\n    num_examples: 34123213\n  - name: personalfinance\n    num_bytes: 9484869588\n    num_examples: 18361314\n  - name: buildapc\n    num_bytes: 9801044390\n    num_examples: 21761801\n  - name: EatCheapAndHealthy\n    num_bytes: 853462012\n    num_examples: 1821897\n  - name: boardgames\n    num_bytes: 3131627378\n    num_examples: 6328926\n  - name: malefashionadvice\n    num_bytes: 2928017882\n    num_examples: 7712258\n  - name: femalefashionadvice\n    num_bytes: 1619784736\n    num_examples: 3262969\n  - name: scifi\n    num_bytes: 888152056\n    num_examples: 2193741\n  - name: Fantasy\n    num_bytes: 2285934538\n    num_examples: 4566639\n  - name: Games\n    num_bytes: 10396813188\n    num_examples: 23373965\n  - name: bodyweightfitness\n    num_bytes: 794549854\n    num_examples: 1613634\n  - name: SkincareAddiction\n    num_bytes: 3421122597\n    num_examples: 5660550\n  - name: podcasts\n    num_bytes: 464773126\n    num_examples: 943266\n  - name: suggestmeabook\n    num_bytes: 1842944304\n    num_examples: 3492937\n  - name: AskHistorians\n    num_bytes: 2244587909\n    num_examples: 2714353\n  - name: gaming\n    num_bytes: 28374513722\n    num_examples: 85729253\n  - name: DIY\n    num_bytes: 2113533684\n    num_examples: 4489265\n  - name: sports\n    num_bytes: 2230129132\n    num_examples: 6470079\n  - name: space\n    num_bytes: 3081499208\n    num_examples: 7896182\n  - name: gadgets\n    num_bytes: 1683252868\n    num_examples: 4104833\n  - name: Documentaries\n    num_bytes: 1852644771\n    num_examples: 4051474\n  - name: GetMotivated\n    num_bytes: 1211761267\n    num_examples: 3221980\n  - name: UpliftingNews\n    num_bytes: 2003149025\n    num_examples: 4741948\n  - name: technology\n    num_bytes: 10826871436\n    num_examples: 25404699\n  - name: Fitness\n    num_bytes: 6191132755\n    num_examples: 14319856\n  - name: travel\n    num_bytes: 1740556350\n    num_examples: 3806755\n  - name: lifehacks\n    num_bytes: 626791812\n    num_examples: 1799437\n  - name: Damnthatsinteresting\n    num_bytes: 6376694618\n    num_examples: 15643554\n  - name: gardening\n    num_bytes: 1825313940\n    num_examples: 4568468\n  - name: mildlyinteresting\n    num_bytes: 9079894206\n    num_examples: 26436769\n  download_size: 109177016105\n  dataset_size: 255339788158\nannotations_creators:\n- no-annotation\nlanguage:\n- en\nlanguage_creators:\n- found\nlicense: []\nmultilinguality:\n- monolingual\npretty_name: Reddit comments\nsize_categories:\n- 10B<n<100B\nsource_datasets: []\ntags:\n- reddit\n- social-media\ntask_categories:\n- text-generation\ntask_ids:\n- dialogue-modeling\n- language-modeling\n---\n\n# Dataset Card for "REDDIT_comments"\n## Dataset Description\n\n- **Homepage:**\n- **Paper: https://arxiv.org/abs/2001.08435**\n\n### Dataset Summary\nComments of 50 high-quality subreddits, extracted from the REDDIT PushShift data dumps (from 2006 to Jan 2023).\n\n### Supported Tasks\nThese comments can be used for text generation and language modeling, as well as dialogue modeling.\n\n## Dataset Structure\n### Data Splits\nEach split corresponds to a specific subreddit in the following list: "tifu", "explainlikeimfive", "WritingPrompts", "changemyview", "LifeProTips", "todayilearned", "science", "askscience", "ifyoulikeblank", "Foodforthought", "IWantToLearn", "bestof", "IAmA", "socialskills", "relationship_advice", "philosophy", "YouShouldKnow", "history", "books", "Showerthoughts", "personalfinance", "buildapc", "EatCheapAndHealthy", "boardgames", "malefashionadvice", "femalefashionadvice", "scifi", "Fantasy", "Games", "bodyweightfitness", "SkincareAddiction", "podcasts", "suggestmeabook", "AskHistorians", "gaming", "DIY", "mildlyinteresting", "sports", "space", "gadgets", "Documentaries", "GetMotivated", "UpliftingNews", "technology", "Fitness", "travel", "lifehacks", "Damnthatsinteresting", "gardening", "programming"\n\n## Dataset Creation\n\n### Curation Rationale\nAll the information fields have been cast to string, as their format change through time from one dump to the following. A reduced number of keys have been kept: "archived", "author", "author_fullname", "body", "comment_type", "controversiality", "created_utc", "edited", "gilded", "id", "link_id", "locked", "name", "parent_id", "permalink", "retrieved_on", "score", "subreddit", "subreddit_id", "subreddit_name_prefixed", "subreddit_type", "total_awards_received".\n\n### Source Data\nThe [Reddit PushShift data dumps](https://files.pushshift.io/reddit/) are part of a data collection effort which crawls Reddit at regular intervals, to extract and keep all its data.\n\n#### Initial Data Collection and Normalization\nSee the paper.\n\n#### Who are the source language producers?\nRedditors are mostly young (65% below 30), male (70%), and American (50% of the site).\n\n### Personal and Sensitive Information\nThe data contains Redditor\'s usernames associated to their content.\n\n## Considerations for Using the Data\n\nThis dataset should be anonymized before any processing.\nThough the subreddits selected are considered as being of higher quality, they can still reflect what you can find on the internet in terms of expressions of biases and toxicity.\n\n### Contributions\n\nThanks to [@clefourrier](https://github.com/clefourrier) for adding this dataset.', 'model_index': None, 'widget_data': None, 'config': None, 'transformers_info': None, 'spaces': None, 'safetensors': None, 'used_storage': None, 'extracted_code': ''}]}}
+- Generated Files: {"evaluate_py": "import json\nfrom pathlib import Path\nfrom typing import Dict\n\nimport torch\nfrom torch.cuda.amp import autocast\n\nfrom .preprocess import load_data\nfrom .train import GATWithHashPipe, _save_json\n\n\ndef evaluate(config: Dict) -\u003e Dict:\n    \"\"\"Load best model checkpoint (here we retrain quickly) and evaluate on test set.\"\"\"\n    # NOTE: For a production system, model weights would be loaded from disk.\n    #       Here, for self-containment, we simply re-instantiate and evaluate.\n\n    data = load_data(config[\u0027dataset\u0027])\n    device = torch.device(\u0027cuda\u0027 if torch.cuda.is_available() else \u0027cpu\u0027)\n    data = data.to(device)\n\n    model = GATWithHashPipe(num_features=data.num_features,\n                            num_classes=int(data.y.max().item() + 1),\n                            hidden=config[\u0027hidden\u0027],\n                            num_layers=config[\u0027num_layers\u0027],\n                            heads=config[\u0027heads\u0027],\n                            use_hashpipe=config.get(\u0027model\u0027, \u0027hashpipe\u0027) == \u0027hashpipe\u0027,\n                            top_k=config[\u0027T\u0027],\n                            cache_size=config[\u0027cache_size\u0027],\n                            sketch_dim=config[\u0027sketch\u0027],\n                            thresholds=tuple(config[\u0027tau\u0027]))\n    model = model.to(device)\n    model.eval()\n\n    with torch.no_grad(), autocast():\n        out = model(data)\n        pred = out.argmax(dim=-1)\n        test_acc = (pred[data.test_mask] == data.y[data.test_mask]).float().mean().item()\n\n    result = {\n        \u0027dataset\u0027: config[\u0027dataset\u0027],\n        \u0027test_accuracy\u0027: test_acc\n    }\n    print(json.dumps(result, indent=2))\n    _save_json(result, f\"eval_{config[\u0027experiment_name\u0027]}\")\n    return result\n", "full_experiment_yaml": "experiment_name: full_experiment\nmodel: hashpipe\ndataset: Reddit\nhidden: 256\nnum_layers: 6\nheads: 8\nT: 32\ncache_size: 16\nsketch: 32\ntau: [4, 8, 12]\nlr: 0.0003\nepochs: 30\nverbose: false\n", "main_py": "import argparse\nimport sys\nfrom pathlib import Path\n\nimport yaml\n\nfrom .train import train_one_run\nfrom .evaluate_py import evaluate\n\n# ----------------------------------------------------------------------------\nCONFIG_DIR = Path(__file__).resolve().parent.parent / \"config\"\n\n\ndef _load_cfg(fname: str):\n    fp = CONFIG_DIR / fname\n    try:\n        with fp.open() as f:\n            cfg = yaml.safe_load(f)\n        return cfg\n    except FileNotFoundError as e:\n        print(f\"Configuration file {fname} not found: {e}\", file=sys.stderr)\n        sys.exit(1)\n\n\n# ----------------------------------------------------------------------------\n\ndef main():\n    parser = argparse.ArgumentParser(description=\"HASHPIPE-GAT experiment runner\")\n    group = parser.add_mutually_exclusive_group(required=True)\n    group.add_argument(\"--smoke-test\", action=\"store_true\", help=\"Run quick smoke test\")\n    group.add_argument(\"--full-experiment\", action=\"store_true\", help=\"Run full benchmark experiment\")\n    args = parser.parse_args()\n\n    if args.smoke_test:\n        cfg = _load_cfg(\"smoke_test.yaml\")\n    else:\n        cfg = _load_cfg(\"full_experiment.yaml\")\n\n    # ---------------- Run training --------------------------------------\n    print(\"Starting training ...\")\n    train_res = train_one_run(cfg)\n\n    # ---------------- Evaluation ---------------------------------------\n    print(\"\\nStarting evaluation ...\")\n    evaluate(cfg)\n\n    print(\"\\nAll done.\")\n\n\nif __name__ == \"__main__\":\n    main()\n", "preprocess_py": "import os\nfrom functools import lru_cache\nfrom typing import Literal\n\nimport torch\nfrom torch_geometric.datasets import Reddit, Planetoid\nfrom torch_geometric.transforms import NormalizeFeatures\n\n__all__ = [\"load_data\"]\n\ndata_root = os.getenv(\"DATA_ROOT\", \"./data\")\n\n\n@lru_cache(maxsize=None)\ndef load_data(dataset: Literal[\"Reddit\", \"Cora\", \"CiteSeer\", \"PubMed\"]) -\u003e torch_geometric.data.Data:  # type: ignore\n    \"\"\"Load and cache graph datasets with basic preprocessing.\"\"\"\n    name = dataset.lower()\n    if name == \"reddit\":\n        ds = Reddit(root=f\"{data_root}/Reddit\", transform=NormalizeFeatures())\n    elif name in {\"cora\", \"citeseer\", \"pubmed\"}:\n        ds = Planetoid(root=f\"{data_root}/{dataset}\", name=dataset, transform=NormalizeFeatures())\n    else:\n        raise ValueError(f\"Unsupported dataset {dataset}\")\n\n    return ds[0]\n", "pyproject_toml": "[project]\nname = \"hashpipe_gat\"\nversion = \"0.1.0\"\ndescription = \"Refactored HASHPIPE-GAT experimental framework\"\nauthors = [\"Researcher \u003cresearch@example.com\u003e\"]\nreadme = \"README.md\"\nrequires-python = \"\u003e=3.9\"\n\n[build-system]\nrequires = [\"setuptools\u003e=65.0\"]\nbuild-backend = \"setuptools.build_meta\"\n\n[tool.setuptools.packages.find]\nwhere = [\"src\"]\n\n[project.optional-dependencies]\n\n[project.urls]\nHomepage = \"https://example.com/hashpipe-gat\"\n\n[project.scripts]\n\n[tool.ruff]\n\n[tool.black]\n\n[tool.isort]\n\n[project]\ndependencies = [\n  \"torch\u003e=2.0.0\",\n  \"torch_geometric\u003e=2.3.0\",\n  \"pyyaml\u003e=6.0\",\n  \"numpy\u003e=1.23.0\"\n]\n", "smoke_test_yaml": "experiment_name: smoke_test\nmodel: hashpipe\ndataset: Reddit\nhidden: 64\nnum_layers: 2\nheads: 4\nT: 8\ncache_size: 4\nsketch: 16\ntau: [4, 8, 12]\nlr: 0.001\nepochs: 1\nverbose: true\n", "train_py": "import os\nimport json\nfrom pathlib import Path\nfrom typing import Dict\n\nimport torch\nfrom torch import Tensor\nfrom torch import nn\nfrom torch.nn import functional as F\nfrom torch.cuda.amp import autocast, GradScaler\nfrom torch_geometric.nn import GATConv\n\nfrom .preprocess import load_data\n\n# ------------------ HASHPIPE core -------------------------------------------------\nclass HashPipeFilter(nn.Module):\n    \"\"\"Multi-resolution SimHash + Progressive Top-K Cache as described in the paper.\n    The module is kept self-contained so it can be plugged into any GNN layer that\n    needs to prune an adjacency list before computing attention scores.\n    \"\"\"\n\n    def __init__(self, top_k: int = 32, cache_size: int = 16, sketch_dim: int = 32,\n                 thresholds=(4, 8, 12)) -\u003e None:\n        super().__init__()\n        self.T = top_k\n        self.cache_size = cache_size\n        self.s = sketch_dim\n        self.t16, self.t32, self.t64 = thresholds\n        # the cache is stored as a python list of torch tensors on CPU to avoid GPU RAM use\n        self.register_buffer(\"_dummy\", torch.empty(0))  # buffer to obtain correct device\n        self._cache = []  # type: ignore\n\n    # -------------------------------------------------------------------------\n    @staticmethod\n    def _view_as_uint(x: Tensor) -\u003e Tensor:\n        # ensure contiguous and convert the first N bytes to uint8 for hashing\n        return x.view(torch.uint8)\n\n    # -------------------------------------------------------------------------\n    def forward(self, row: Tensor, col: Tensor, q: Tensor, k: Tensor) -\u003e Tensor:  # noqa: C901\n        \"\"\"Return a boolean mask indicating which (row[i], col[i]) pairs survive.\n\n        Args\n        -----\n        row:  (E,)  source node indices for every edge in the CSR representation\n        col:  (E,)  destination node indices\n        q:    (N, d)  Query vectors (usually from the current node representations)\n        k:    (N, d)  Key   vectors (usually from neighbour node representations)\n        \"\"\"\n        device = q.device\n        if not self._cache:\n            # lazily initialise caches\n            self._cache = [torch.empty(0, dtype=torch.long, device=\u0027cpu\u0027) for _ in range(q.size(0))]\n\n        mask = torch.zeros_like(col, dtype=torch.bool, device=device)\n\n        # ---------------- Stage-1 : 16-bit SimHash --------------------------\n        hq16 = self._view_as_uint(q[row][:, :16]).sum(-1).to(torch.int32)\n        hk16 = self._view_as_uint(k[col][:, :16]).sum(-1).to(torch.int32)\n        cand = (hq16 ^ hk16).bit_count() \u003c= self.t16\n\n        # ---------------- Stage-2 : 32-bit SimHash --------------------------\n        if cand.any():\n            idx = cand.nonzero(as_tuple=False).squeeze()\n            hq32 = self._view_as_uint(q[row[idx]][:, :32]).sum(-1).to(torch.int32)\n            hk32 = self._view_as_uint(k[col[idx]][:, :32]).sum(-1).to(torch.int32)\n            cand[idx] \u0026= (hq32 ^ hk32).bit_count() \u003c= self.t32\n\n        # ---------------- Stage-3 : 64-bit SimHash --------------------------\n        idx = cand.nonzero(as_tuple=False).squeeze()\n        if idx.numel() \u003e 0:\n            hq64 = self._view_as_uint(q[row[idx]]).sum(-1).to(torch.int64)\n            hk64 = self._view_as_uint(k[col[idx]]).sum(-1).to(torch.int64)\n            cand[idx] \u0026= (hq64 ^ hk64).bit_count() \u003c= self.t64\n\n        mask |= cand.to(device)\n\n        # ---------------- Union with Historical Cache -----------------------\n        for i in range(row.numel()):\n            src = row[i].item()\n            if self._cache[src].numel():\n                mask[i] |= (col[i] in self._cache[src])\n\n        return mask\n\n    # -------------------------------------------------------------------------\n    @torch.no_grad()\n    def update_cache(self, src_nodes: Tensor, dst_nodes: Tensor, scores: Tensor) -\u003e None:\n        \"\"\"After an epoch, update PTKC (top-T cache) with the highest-scoring edges.\"\"\"\n        for v in src_nodes.unique():\n            v = v.item()\n            # pick top-T dst for this v\n            mask = (src_nodes == v)\n            if mask.any():\n                topk = torch.topk(scores[mask], self.cache_size, largest=True, sorted=False).indices\n                self._cache[v] = dst_nodes[mask][topk].cpu()\n\n\n# =============================================================================\n#  Simple GAT Model with optional HASHPIPE pruning\n# =============================================================================\nclass GATWithHashPipe(nn.Module):\n    def __init__(self, num_features: int, num_classes: int, hidden: int, num_layers: int,\n                 heads: int, use_hashpipe: bool = True, **hp_kwargs):\n        super().__init__()\n        self.layers = nn.ModuleList()\n        self.use_hashpipe = use_hashpipe\n        self.hp_filter = HashPipeFilter(**hp_kwargs) if use_hashpipe else None\n\n        in_channels = num_features\n        for i in range(num_layers):\n            out_channels = hidden if i \u003c num_layers - 1 else num_classes\n            self.layers.append(GATConv(in_channels, out_channels // heads, heads=heads, dropout=0.6))\n            in_channels = out_channels\n\n    # ---------------------------------------------------------------------\n    def forward(self, data):  # data is a torch_geometric.data.Data object\n        x, edge_index = data.x, data.edge_index\n        for conv in self.layers[:-1]:\n            if self.use_hashpipe:\n                edge_index = self._prune_edges(edge_index, x)\n            x = F.dropout(x, p=0.6, training=self.training)\n            x = conv(x, edge_index)\n            x = F.elu(x)\n        # last layer\n        conv = self.layers[-1]\n        if self.use_hashpipe:\n            edge_index = self._prune_edges(edge_index, x)\n        x = conv(x, edge_index)\n        return F.log_softmax(x, dim=-1)\n\n    # ---------------------------------------------------------------------\n    def _prune_edges(self, edge_index: Tensor, x: Tensor) -\u003e Tensor:\n        row, col = edge_index\n        mask = self.hp_filter(row, col, x, x)\n        return edge_index[:, mask]\n\n\n# =============================================================================\n#  Training Loop\n# =============================================================================\n\ndef train_one_run(config: Dict) -\u003e Dict:\n    device = torch.device(\u0027cuda\u0027 if torch.cuda.is_available() else \u0027cpu\u0027)\n\n    data = load_data(config[\u0027dataset\u0027])\n    data = data.to(device)\n\n    model = GATWithHashPipe(num_features=data.num_features,\n                            num_classes=int(data.y.max().item() + 1),\n                            hidden=config[\u0027hidden\u0027],\n                            num_layers=config[\u0027num_layers\u0027],\n                            heads=config[\u0027heads\u0027],\n                            use_hashpipe=config.get(\u0027model\u0027, \u0027hashpipe\u0027) == \u0027hashpipe\u0027,\n                            top_k=config[\u0027T\u0027],\n                            cache_size=config[\u0027cache_size\u0027],\n                            sketch_dim=config[\u0027sketch\u0027],\n                            thresholds=tuple(config[\u0027tau\u0027]))\n\n    model = model.to(device)\n    optimiser = torch.optim.AdamW(model.parameters(), lr=config[\u0027lr\u0027], weight_decay=1e-4)\n    scaler = GradScaler()\n\n    best_val = 0.0\n    best_test = 0.0\n\n    for epoch in range(1, config[\u0027epochs\u0027] + 1):\n        model.train()\n        optimiser.zero_grad(set_to_none=True)\n        with autocast():\n            out = model(data)\n            loss = F.nll_loss(out[data.train_mask], data.y[data.train_mask])\n        scaler.scale(loss).backward()\n        scaler.step(optimiser)\n        scaler.update()\n\n        # Evaluation\n        model.eval()\n        with torch.no_grad(), autocast():\n            pred = out.argmax(dim=-1)\n            train_acc = (pred[data.train_mask] == data.y[data.train_mask]).float().mean().item()\n            val_acc = (pred[data.val_mask] == data.y[data.val_mask]).float().mean().item()\n            test_acc = (pred[data.test_mask] == data.y[data.test_mask]).float().mean().item()\n\n        if val_acc \u003e best_val:\n            best_val, best_test = val_acc, test_acc\n\n        if config.get(\u0027verbose\u0027, False):\n            print(f\"Epoch {epoch:02d} | Loss {loss.item():.4f} | Train {train_acc:.3f} | \"\n                  f\"Val {val_acc:.3f} | Test {test_acc:.3f}\")\n\n    result = {\n        \u0027dataset\u0027: config[\u0027dataset\u0027],\n        \u0027best_val_acc\u0027: best_val,\n        \u0027best_test_acc\u0027: best_test,\n        \u0027epochs\u0027: config[\u0027epochs\u0027]\n    }\n    _save_json(result, config[\u0027experiment_name\u0027])\n    return result\n\n\n# =============================================================================\n#  Utilities\n# =============================================================================\n\ndef _save_json(obj: Dict, exp_name: str) -\u003e None:\n    out_dir = Path(\u0027.research\u0027) / \u0027iteration1\u0027\n    out_dir.mkdir(parents=True, exist_ok=True)\n    fp = out_dir / f\"{exp_name}.json\"\n    with fp.open(\u0027w\u0027) as f:\n        json.dump(obj, f, indent=2)\n    print(json.dumps(obj, indent=2))\n"}
+
+**Experimental Results:**
+- Result: === [PHASE 2/2] Full experiment start Mon Sep 22 09:55:16 AM UTC 2025 ===
+- Error: /home/toma/pt-80-1-a-13/_work/experiment_matsuzawa_2509222/experiment_matsuzawa_2509222/src/train.py:212: FutureWarning: `torch.cuda.amp.GradScaler(args...)` is deprecated. Please use `torch.amp.GradScaler('cuda', args...)` instead.
+  scaler = GradScaler()
+/home/toma/pt-80-1-a-13/_work/experiment_matsuzawa_2509222/experiment_matsuzawa_2509222/src/train.py:220: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.
+  with autocast():
+
+**Primary Goal**: Provide feedback that helps improve the consistency_score in future iterations. Focus on actionable steps that would transform a low-scoring experiment into a high-scoring (8-10) experiment with strong consistency and scientific rigor.
+Output:
+{
+    "consistency_feedback": "Summary:\nThe paper proposes a sophisticated, probabilistically-guaranteed attention pipeline (PTKC+multi-resolution SimHash+CountSketch, cache updates, layer sharing, structural sparsity, activation compression, etc.).  The provided experimental strategy claims to validate these contributions on billion-edge graphs and to verify the (ε,δ) guarantees.  The supplied code and observed results, however, realise only a small subset of that pipeline on small toy datasets.  As a consequence, the presented empirical evidence cannot substantiate the scientific claims.  Problems are enumerated below.\n\n────────────────────────────────────────────────────────\n1. Experimental Strategy Issues\n   • Metrics & datasets mismatch: strategy targets Products/Papers100M/Friendster, but the run script and preprocessing code only support Reddit/Cora/CiteSeer/PubMed.  Billion-edge scalability, memory and energy claims therefore remain untested.\n   • Key metrics promised (wall-clock, memory, energy, PTKC hit-rate, hashing fraction, (ε,δ) curves) are neither collected nor reported.  Only node-classification accuracy on a small split is printed.\n   • Baseline comparison absent: vanilla GAT and HiPPO-GAT are never instantiated, so relative speed/accuracy numbers are missing.\n\n2. Implementation Issues (Generated Files)\n   • CountSketch dot-product estimator is completely absent; forward pass never approximates Q·K, so the (ε,δ) guarantee cannot hold.\n   • Progressive Top-K Cache (PTKC) logic is stub-level:  \n        – cache initialisation/updates are CPU-side python lists; update_cache() is never called; cached edges are never populated, so cache-hit ratio is effectively 0 %.  \n        – O(|E|) python \"for\" loop with “col[i] in self._cache[src]” defeats the advertised GPU parallelism and sub-log cost.\n   • Layer-shared memoisation, 2:4 sparsity, and activation compression are not implemented.\n   • No logging infrastructure for sketch error or PTKC hit-rate; Scalability & Guarantee studies cannot be reproduced.\n\n3. Strategy-Implementation Alignment Issues\n   • Strategy relies on CountSketch & cache for sub-logarithmic complexity; implementation omits them ⇒ claimed complexity reduction is unsupported.\n   • Strategy specifies three-stage SimHash with early-exit warping; code computes hashes but still constructs full boolean mask before pruning, so runtime characteristics differ from description.\n   • Energy & memory measurements promised, but no code path captures nvml or torch.cuda stats.\n\n4. Result Interpretation Issues\n   • Expected results (e.g., 4× speed-up on Products, 5.6× on Papers100M, empirical error ≤0.07) are not produced.  The single printed accuracy on Reddit, obtained with an incomplete algorithm, cannot be extrapolated to support those claims.\n   • Because CountSketch is absent, any statement regarding (ε,δ) bounds is presently theoretical; no empirical evidence is supplied.\n\n────────────────────────────────────────────────────────\nActionable consistency-focused suggestions (within scope):\nA. Strategy refinement\n   • Restrict initial validation to datasets the implementation can actually load, or extend data loaders to OGB-scale graphs; otherwise scale claims should be toned down.\n   • Define and log the promised metrics (time, memory, sketch error, cache hit-rate) in the experimental pipeline so they correspond 1-to-1 with stated goals.\n\nB. Implementation completion\n   • Add the CountSketch module and integrate it into attention score computation so that relative-error statistics can be gathered.\n   • Invoke update_cache() at the end of each training epoch and store caches on device-friendly structures (e.g. fixed-size torch tensors) to realise PTKC and permit hit-rate measurement.\n   • Provide baseline model classes for vanilla GAT and HiPPO-GAT and run them under identical configs to enable fair comparisons.\n\nC. Alignment checks\n   • After implementing CountSketch and PTKC, verify that logging shows non-trivial cache-hit percentages and sketch errors within theoretical bounds; otherwise revisit thresholds/s values.\n   • Ensure time measurements are taken after pruning to confirm the advertised sub-logarithmic behaviour.\n\nUntil these alignment gaps are closed, the experimental evidence does not justify the paper’s performance, accuracy, or theoretical-guarantee claims.",
+    "consistency_score": 3
+}
