@@ -1,0 +1,17 @@
+
+Input:
+# Task
+You carefully read the contents of the “Paper Outline” and select one GitHub link from the “GitHub URLs List” that you think is most relevant to the contents.
+# Constraints
+- Output the index number corresponding to the selected GitHub URL.
+- Be sure to select only one GitHub URL.
+- If there is no related GitHub link, output None.
+# Paper Outline
+POEM's methodology is built on two pillars: 1. **Online statistical framework for drift detection**: It monitors for distribution shifts by sequentially testing if the distribution of classifier's entropy values at test time (Zt) deviates from those of the source domain (Zs). This uses a 'testing-by-betting' approach where a test martingale is formulated based on `uj = Fs(Zt j) ~ U[0, 1]`, with a betting function `b(uj) = 1 + εj(uj - 0.5)`. The betting variable `εj` is adaptively learned using a Scale-Free Online Gradient Descent (SF-OGD) algorithm to maximize accumulated wealth, enabling fast reactions to shifts. 2. **Online adaptation mechanism**: It leverages the betting function, interpreted as a likelihood ratio, to obtain an adapted pseudo-entropy value `~Zj = Fs^-1(Q(uj))`, where `Q(uj)` is derived from the betting function. This `~Zj` better matches the source entropy distribution and is analytically linked to the optimal transport map. Model parameters (specifically normalization layers `ω`) are updated by minimizing a self-supervised entropy-matching loss: `ℓmatch(Zt j, ~Zj) = 1/2 * (ℓent(fˆθ+ωj (Xt j)) - ~Zj)^2`. A refined loss, `ℓmatch++`, incorporates sample filtering (for high-entropy samples) and sample weighting (favoring low-entropy samples). The empirical CDF of source entropies (`Fs`) is pre-computed offline using holdout unlabeled samples.
+
+# GitHub URLs List
+['https://github.com/yarinbar/poem', 'https://github.com/mr-eggplant/SAR', 'https://github.com/qinenergy/cotta', 'https://github.com/chenyaofo/pytorch-cifar-models']
+Output:
+{
+    "index": 0
+}
