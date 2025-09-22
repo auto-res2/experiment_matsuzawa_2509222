@@ -1,0 +1,17 @@
+
+Input:
+# Task
+You carefully read the contents of the “Paper Outline” and select one GitHub link from the “GitHub URLs List” that you think is most relevant to the contents.
+# Constraints
+- Output the index number corresponding to the selected GitHub URL.
+- Be sure to select only one GitHub URL.
+- If there is no related GitHub link, output None.
+# Paper Outline
+The ATTA problem is formally defined, integrating active learning within the Fully Test-Time Adaptation (FTTA) framework. Theoretical analyses are provided to address distribution shifts and mitigate catastrophic forgetting. For distribution shifts, learning bounds and generalization bounds are established, showing that the inclusion of limited labeled test instances significantly improves performance. For catastrophic forgetting, the method explores acquiring 'source-like' data by selecting low-entropy samples from the pre-trained model's predictions, treating these as approximations of source data. This selective entropy minimization is theoretically shown to prevent CF. The proposed algorithm, SimATTA, involves partitioning streaming unlabeled test samples into high and low entropy datasets. Low-entropy samples are pseudo-labeled by the frozen source-pretrained model. High-entropy samples for active labeling are selected using an incremental clustering technique, which is a novel continual clustering method based on weighted K-means designed to store representative 'anchors' of seen distributions. The model then undergoes test-time training using both pseudo-labeled low-entropy samples and actively labeled high-entropy anchors, with balanced weights to optimize adaptation and mitigate CF.
+
+# GitHub URLs List
+['https://github.com/divelab/ATTA', 'https://github.com/DequanWang/tent', 'https://github.com/mr-eggplant/EATA', 'https://github.com/qinenergy/cotta', 'https://github.com/mr-eggplant/SAR', 'https://github.com/virajprabhu/CLUE']
+Output:
+{
+    "index": 0
+}
