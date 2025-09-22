@@ -1,0 +1,17 @@
+
+Input:
+# Task
+You carefully read the contents of the “Paper Outline” and select one GitHub link from the “GitHub URLs List” that you think is most relevant to the contents.
+# Constraints
+- Output the index number corresponding to the selected GitHub URL.
+- Be sure to select only one GitHub URL.
+- If there is no related GitHub link, output None.
+# Paper Outline
+The ATTA problem is formally defined as continuously optimizing a pre-trained model on streaming unlabeled test data by actively selecting informative instances for labeling and incorporating them into the training set, respecting a budget. The learning theory analysis uses H∆H-distance to quantify distribution shifts and establishes generalization bounds, showing that incorporating labeled test instances improves performance. To mitigate catastrophic forgetting (CF), 'selective entropy minimization' is proposed: low-entropy samples from the test stream are pseudo-labeled by the frozen source-pretrained model, acting as 'source-like' data. The SimATTA algorithm (Algorithm 1) involves partitioning incoming test samples into high-entropy and low-entropy sets. Low-entropy samples are pseudo-labeled and used for training, while high-entropy samples are selected for oracle-based active labeling using an 'incremental clustering' technique. The model is then fine-tuned with both pseudo-labeled low-entropy samples and actively labeled high-entropy 'anchors,' with carefully balanced training weights to address both distribution shifts and CF. Incremental clustering (Algorithm 2) is a continual clustering method using weighted K-means to select representative 'anchors' from high-entropy samples, covering seen distributions and adding new clusters for newly encountered distributions while managing a cluster budget.
+
+# GitHub URLs List
+['https://github.com/divelab/ATTA', 'https://github.com/DequanWang/tent', 'https://github.com/mr-eggplant/EATA', 'https://github.com/qinenergy/cotta', 'https://github.com/mr-eggplant/SAR', 'https://github.com/virajprabhu/CLUE']
+Output:
+{
+    "index": 0
+}
