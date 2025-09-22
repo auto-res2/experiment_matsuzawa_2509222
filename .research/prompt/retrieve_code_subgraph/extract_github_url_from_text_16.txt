@@ -1,0 +1,17 @@
+
+Input:
+# Task
+You carefully read the contents of the “Paper Outline” and select one GitHub link from the “GitHub URLs List” that you think is most relevant to the contents.
+# Constraints
+- Output the index number corresponding to the selected GitHub URL.
+- Be sure to select only one GitHub URL.
+- If there is no related GitHub link, output None.
+# Paper Outline
+HyperAttention's methodology involves two main components: efficiently estimating the diagonal scaling matrix D and approximating the matrix product of the softmax matrix (D^-1A) and value matrix (V) via subsampling. For estimating D, the algorithm first identifies dominant entries in the attention matrix using "sortLSH," a Hamming sorted Locality Sensitive Hashing (LSH) variant (Algorithm 1), to generate a sparse mask. It then combines masked attention values with a randomly chosen subset of keys to approximate D (Algorithm 2). For approximating the product of D^-1A and V, a sampling matrix S is constructed based on the squared row norms of V, leveraging Approximate Matrix Multiplication (AMM) techniques, often using uniform sampling in practice. Causal masking is handled recursively (Algorithm 4), by decomposing the masked attention matrix into smaller causal blocks and an unmasked block, applying the respective approximation methods. The theoretical guarantees are analyzed using two fine-grained parameters: the maximum column L2-norm in the normalized attention matrix and the ratio of row norms in the unnormalized attention matrix after removing large entries.
+
+# GitHub URLs List
+['https://github.com/insuhan/hyper-attn']
+Output:
+{
+    "index": 0
+}
