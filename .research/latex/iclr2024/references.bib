@@ -5,3 +5,601 @@
   publisher = {GitHub},
   url       = {https://github.com/airas-org/airas}
 }
+
+% ===========================================
+% REQUIRED CITATIONS
+% These papers must be cited in the manuscript
+% ===========================================
+
+@article{author-year-adaptive,
+ title = {Adaptive Structural Fingerprints for Graph Attention Networks}
+}
+
+@article{author-year-dynamic,
+ title = {Dynamic Rescaling for Training GNNs}
+}
+
+@article{chen-2021-accelerating,
+ abstract = {Communication overhead hinders the scalability of large-scale distributed
+training. Gossip SGD, where each node averages only with its neighbors, is more
+communication-efficient than the prevalent parallel SGD. However, its
+convergence rate is reversely proportional to quantity $1-\beta$ which measures
+the network connectivity. On large and sparse networks where $1-\beta \to 0$,
+Gossip SGD requires more iterations to converge, which offsets against its
+communication benefit. This paper introduces Gossip-PGA, which adds Periodic
+Global Averaging into Gossip SGD. Its transient stage, i.e., the iterations
+required to reach asymptotic linear speedup stage, improves from
+$\Omega(\beta^4 n^3/(1-\beta)^4)$ to $\Omega(\beta^4 n^3 H^4)$ for non-convex
+problems. The influence of network topology in Gossip-PGA can be controlled by
+the averaging period $H$. Its transient-stage complexity is also superior to
+Local SGD which has order $\Omega(n^3 H^4)$. Empirical results of large-scale
+training on image classification (ResNet50) and language modeling (BERT)
+validate our theoretical findings.},
+ arxiv_url = {https://arxiv.org/pdf/2105.09080v1.pdf},
+ author = {Yiming Chen and Kun Yuan and Yingya Zhang and Pan Pan and Yinghui Xu and Wotao Yin},
+ github_url = {https://github.com/NVIDIA/apex},
+ title = {Accelerating Gossip SGD with Periodic Global Averaging},
+ year = {2021}
+}
+
+@article{chen-2021-unified,
+ abstract = {With graphs rapidly growing in size and deeper graph neural networks (GNNs)
+emerging, the training and inference of GNNs become increasingly expensive.
+Existing network weight pruning algorithms cannot address the main space and
+computational bottleneck in GNNs, caused by the size and connectivity of the
+graph. To this end, this paper first presents a unified GNN sparsification
+(UGS) framework that simultaneously prunes the graph adjacency matrix and the
+model weights, for effectively accelerating GNN inference on large-scale
+graphs. Leveraging this new tool, we further generalize the recently popular
+lottery ticket hypothesis to GNNs for the first time, by defining a graph
+lottery ticket (GLT) as a pair of core sub-dataset and sparse sub-network,
+which can be jointly identified from the original GNN and the full dense graph
+by iteratively applying UGS. Like its counterpart in convolutional neural
+networks, GLT can be trained in isolation to match the performance of training
+with the full model and graph, and can be drawn from both randomly initialized
+and self-supervised pre-trained GNNs. Our proposal has been experimentally
+verified across various GNN architectures and diverse tasks, on both
+small-scale graph datasets (Cora, Citeseer and PubMed), and large-scale
+datasets from the challenging Open Graph Benchmark (OGB). Specifically, for
+node classification, our found GLTs achieve the same accuracies with 20%~98%
+MACs saving on small graphs and 25%~85% MACs saving on large ones. For link
+prediction, GLTs lead to 48%~97% and 70% MACs saving on small and large graph
+datasets, respectively, without compromising predictive performance. Codes
+available at https://github.com/VITA-Group/Unified-LTH-GNN.},
+ arxiv_url = {https://arxiv.org/pdf/2102.06790v2.pdf},
+ author = {Tianlong Chen and Yongduo Sui and Xuxi Chen and Aston Zhang and Zhangyang Wang},
+ title = {A Unified Lottery Ticket Hypothesis for Graph Neural Networks},
+ year = {2021}
+}
+
+@article{hu-2024-accelerating,
+ abstract = {Training large transformers is slow, but recent innovations on GPU
+architecture give us an advantage. NVIDIA Ampere GPUs can execute a
+fine-grained 2:4 sparse matrix multiplication twice as fast as its dense
+equivalent. In the light of this property, we comprehensively investigate the
+feasibility of accelerating feed-forward networks (FFNs) of transformers in
+pre-training. First, we define a ``flip rate'' to monitor the stability of a
+2:4 training process. Utilizing this metric, we propose three techniques to
+preserve accuracy: to modify the sparse-refined straight-through estimator by
+applying the masked decay term on gradients, to determine a feasible decay
+factor in warm-up stage, and to enhance the model's quality by a dense
+fine-tuning procedure near the end of pre-training. Besides, we devise two
+techniques to practically accelerate training: to calculate transposable 2:4
+masks by convolution, and to accelerate gated activation functions by reducing
+GPU L2 cache miss. Experiments show that our 2:4 sparse training algorithm
+achieves similar convergence to dense training algorithms on several
+transformer pre-training tasks, while actual acceleration can be observed on
+different shapes of transformer block apparently. Our toolkit is available at
+https://github.com/huyz2023/2by4-pretrain.},
+ arxiv_url = {https://arxiv.org/pdf/2404.01847v3.pdf},
+ author = {Yuezhou Hu and Kang Zhao and Weiyu Huang and Jianfei Chen and Jun Zhu},
+ journal = {Proceedings of the 41st International Conference on Machine
+  Learning (2024), in Proceedings of Machine Learning Research 235:19531-19543},
+ title = {Accelerating Transformer Pre-training with 2:4 Sparsity},
+ year = {2024}
+}
+
+@article{hua-2022-transformer,
+ abstract = {We revisit the design choices in Transformers, and propose methods to address
+their weaknesses in handling long sequences. First, we propose a simple layer
+named gated attention unit, which allows the use of a weaker single-head
+attention with minimal quality loss. We then propose a linear approximation
+method complementary to this new layer, which is accelerator-friendly and
+highly competitive in quality. The resulting model, named FLASH, matches the
+perplexity of improved Transformers over both short (512) and long (8K) context
+lengths, achieving training speedups of up to 4.9$\times$ on Wiki-40B and
+12.1$\times$ on PG-19 for auto-regressive language modeling, and 4.8$\times$ on
+C4 for masked language modeling.},
+ arxiv_url = {https://arxiv.org/pdf/2202.10447v2.pdf},
+ author = {Weizhe Hua and Zihang Dai and Hanxiao Liu and Quoc V. Le},
+ title = {Transformer Quality in Linear Time},
+ year = {2022}
+}
+
+@article{liu-2020-bandit,
+ abstract = {Several sampling algorithms with variance reduction have been proposed for
+accelerating the training of Graph Convolution Networks (GCNs). However, due to
+the intractable computation of optimal sampling distribution, these sampling
+algorithms are suboptimal for GCNs and are not applicable to more general graph
+neural networks (GNNs) where the message aggregator contains learned weights
+rather than fixed weights, such as Graph Attention Networks (GAT). The
+fundamental reason is that the embeddings of the neighbors or learned weights
+involved in the optimal sampling distribution are changing during the training
+and not known a priori, but only partially observed when sampled, thus making
+the derivation of an optimal variance reduced samplers non-trivial. In this
+paper, we formulate the optimization of the sampling variance as an adversary
+bandit problem, where the rewards are related to the node embeddings and
+learned weights, and can vary constantly. Thus a good sampler needs to acquire
+variance information about more neighbors (exploration) while at the same time
+optimizing the immediate sampling variance (exploit). We theoretically show
+that our algorithm asymptotically approaches the optimal variance within a
+factor of 3. We show the efficiency and effectiveness of our approach on
+multiple datasets.},
+ arxiv_url = {https://arxiv.org/pdf/2006.05806v2.pdf},
+ author = {Ziqi Liu and Zhengwei Wu and Zhiqiang Zhang and Jun Zhou and Shuang Yang and Le Song and Yuan Qi},
+ github_url = {https://github.com/xavierzw/ogb-geniepath-bs},
+ title = {Bandit Samplers for Training Graph Neural Networks},
+ year = {2020}
+}
+
+@article{liu-2022-gact,
+ abstract = {Training large neural network (NN) models requires extensive memory
+resources, and Activation Compressed Training (ACT) is a promising approach to
+reduce training memory footprint. This paper presents GACT, an ACT framework to
+support a broad range of machine learning tasks for generic NN architectures
+with limited domain knowledge. By analyzing a linearized version of ACT's
+approximate gradient, we prove the convergence of GACT without prior knowledge
+on operator type or model architecture. To make training stable, we propose an
+algorithm that decides the compression ratio for each tensor by estimating its
+impact on the gradient at run time. We implement GACT as a PyTorch library that
+readily applies to any NN architecture. GACT reduces the activation memory for
+convolutional NNs, transformers, and graph NNs by up to 8.1x, enabling training
+with a 4.2x to 24.7x larger batch size, with negligible accuracy loss. We
+implement GACT as a PyTorch library at
+https://github.com/LiuXiaoxuanPKU/GACT-ICML.},
+ arxiv_url = {https://arxiv.org/pdf/2206.11357v4.pdf},
+ author = {Xiaoxuan Liu and Lianmin Zheng and Dequan Wang and Yukuo Cen and Weize Chen and Xu Han and Jianfei Chen and Zhiyuan Liu and Jie Tang and Joey Gonzalez and Michael Mahoney and Alvin Cheung},
+ github_url = {https://github.com/LiuXiaoxuanPKU/GACT-ICML},
+ title = {GACT: Activation Compressed Training for Generic Network Architectures},
+ year = {2022}
+}
+
+@article{liu-2022-rsc,
+ abstract = {The training of graph neural networks (GNNs) is extremely time consuming
+because sparse graph-based operations are hard to be accelerated by hardware.
+Prior art explores trading off the computational precision to reduce the time
+complexity via sampling-based approximation. Based on the idea, previous works
+successfully accelerate the dense matrix based operations (e.g., convolution
+and linear) with negligible accuracy drop. However, unlike dense matrices,
+sparse matrices are stored in the irregular data format such that each
+row/column may have different number of non-zero entries. Thus, compared to the
+dense counterpart, approximating sparse operations has two unique challenges
+(1) we cannot directly control the efficiency of approximated sparse operation
+since the computation is only executed on non-zero entries; (2) sub-sampling
+sparse matrices is much more inefficient due to the irregular data format. To
+address the issues, our key idea is to control the accuracy-efficiency trade
+off by optimizing computation resource allocation layer-wisely and
+epoch-wisely. Specifically, for the first challenge, we customize the
+computation resource to different sparse operations, while limit the total used
+resource below a certain budget. For the second challenge, we cache previous
+sampled sparse matrices to reduce the epoch-wise sampling overhead. Finally, we
+propose a switching mechanisms to improve the generalization of GNNs trained
+with approximated operations. To this end, we propose Randomized Sparse
+Computation, which for the first time demonstrate the potential of training
+GNNs with approximated operations. In practice, rsc can achieve up to
+$11.6\times$ speedup for a single sparse operation and a $1.6\times$ end-to-end
+wall-clock time speedup with negligible accuracy drop.},
+ arxiv_url = {https://arxiv.org/pdf/2210.10737v2.pdf},
+ author = {Zirui Liu and Shengyuan Chen and Kaixiong Zhou and Daochen Zha and Xiao Huang and Xia Hu},
+ title = {RSC: Accelerate Graph Neural Networks Training via Randomized Sparse Computations},
+ year = {2022}
+}
+
+@article{mustafa-2023-are,
+ abstract = {While the expressive power and computational capabilities of graph neural
+networks (GNNs) have been theoretically studied, their optimization and
+learning dynamics, in general, remain largely unexplored. Our study undertakes
+the Graph Attention Network (GAT), a popular GNN architecture in which a node's
+neighborhood aggregation is weighted by parameterized attention coefficients.
+We derive a conservation law of GAT gradient flow dynamics, which explains why
+a high portion of parameters in GATs with standard initialization struggle to
+change during training. This effect is amplified in deeper GATs, which perform
+significantly worse than their shallow counterparts. To alleviate this problem,
+we devise an initialization scheme that balances the GAT network. Our approach
+i) allows more effective propagation of gradients and in turn enables
+trainability of deeper networks, and ii) attains a considerable speedup in
+training and convergence time in comparison to the standard initialization. Our
+main theorem serves as a stepping stone to studying the learning dynamics of
+positive homogeneous models with attention mechanisms.},
+ arxiv_url = {https://arxiv.org/pdf/2310.07235v2.pdf},
+ author = {Nimrah Mustafa and Aleksandar Bojchevski and Rebekka Burkholz},
+ github_url = {https://github.com/Diego999/pyGAT},
+ title = {Are GATs Out of Balance?},
+ year = {2023}
+}
+
+@article{mustafa-2024-gate,
+ abstract = {Graph Attention Networks (GATs) are designed to provide flexible neighborhood
+aggregation that assigns weights to neighbors according to their importance. In
+practice, however, GATs are often unable to switch off task-irrelevant
+neighborhood aggregation, as we show experimentally and analytically. To
+address this challenge, we propose GATE, a GAT extension that holds three major
+advantages: i) It alleviates over-smoothing by addressing its root cause of
+unnecessary neighborhood aggregation. ii) Similarly to perceptrons, it benefits
+from higher depth as it can still utilize additional layers for (non-)linear
+feature transformations in case of (nearly) switched-off neighborhood
+aggregation. iii) By down-weighting connections to unrelated neighbors, it
+often outperforms GATs on real-world heterophilic datasets. To further validate
+our claims, we construct a synthetic test bed to analyze a model's ability to
+utilize the appropriate amount of neighborhood aggregation, which could be of
+independent interest.},
+ arxiv_url = {https://arxiv.org/pdf/2406.00418v2.pdf},
+ author = {Nimrah Mustafa and Rebekka Burkholz},
+ title = {GATE: How to Keep Out Intrusive Neighbors},
+ year = {2024}
+}
+
+@article{such-2019-generative,
+ abstract = {This paper investigates the intriguing question of whether we can create
+learning algorithms that automatically generate training data, learning
+environments, and curricula in order to help AI agents rapidly learn. We show
+that such algorithms are possible via Generative Teaching Networks (GTNs), a
+general approach that is, in theory, applicable to supervised, unsupervised,
+and reinforcement learning, although our experiments only focus on the
+supervised case. GTNs are deep neural networks that generate data and/or
+training environments that a learner (e.g. a freshly initialized neural
+network) trains on for a few SGD steps before being tested on a target task. We
+then differentiate through the entire learning process via meta-gradients to
+update the GTN parameters to improve performance on the target task. GTNs have
+the beneficial property that they can theoretically generate any type of data
+or training environment, making their potential impact large. This paper
+introduces GTNs, discusses their potential, and showcases that they can
+substantially accelerate learning. We also demonstrate a practical and exciting
+application of GTNs: accelerating the evaluation of candidate architectures for
+neural architecture search (NAS), which is rate-limited by such evaluations,
+enabling massive speed-ups in NAS. GTN-NAS improves the NAS state of the art,
+finding higher performing architectures when controlling for the search
+proposal mechanism. GTN-NAS also is competitive with the overall state of the
+art approaches, which achieve top performance while using orders of magnitude
+less computation than typical NAS methods. Speculating forward, GTNs may
+represent a first step toward the ambitious goal of algorithms that generate
+their own training data and, in doing so, open a variety of interesting new
+research questions and directions.},
+ arxiv_url = {https://arxiv.org/pdf/1912.07768v1.pdf},
+ author = {Felipe Petroski Such and Aditya Rawal and Joel Lehman and Kenneth O. Stanley and Jeff Clune},
+ title = {Generative Teaching Networks: Accelerating Neural Architecture Search by Learning to Generate Synthetic Training Data},
+ year = {2019}
+}
+
+@article{yang-2023-gated,
+ abstract = {Transformers with linear attention allow for efficient parallel training but
+can simultaneously be formulated as an RNN with 2D (matrix-valued) hidden
+states, thus enjoying linear-time inference complexity. However, linear
+attention generally underperforms ordinary softmax attention. Moreover, current
+implementations of linear attention lack I/O-awareness and are thus slower than
+highly optimized implementations of softmax attention. This work describes a
+hardware-efficient algorithm for linear attention that trades off memory
+movement against parallelizability. The resulting implementation, dubbed
+FLASHLINEARATTENTION, is faster than FLASHATTENTION-2 (Dao, 2023) as a
+standalone layer even on short sequence lengths (e.g., 1K). We then generalize
+this algorithm to a more expressive variant of linear attention with
+data-dependent gates. When used as a replacement for the standard attention
+layer in Transformers, the resulting gated linear attention (GLA) Transformer
+is found to perform competitively against the LLaMA-architecture Transformer
+(Touvron et al., 2023) as well recent linear-time-inference baselines such as
+RetNet (Sun et al., 2023a) and Mamba (Gu & Dao, 2023) on moderate-scale
+language modeling experiments. GLA Transformer is especially effective at
+length generalization, enabling a model trained on 2K to generalize to
+sequences longer than 20K without significant perplexity degradations. For
+training speed, the GLA Transformer has higher throughput than a
+similarly-sized Mamba model.},
+ arxiv_url = {https://arxiv.org/pdf/2312.06635v6.pdf},
+ author = {Songlin Yang and Bailin Wang and Yikang Shen and Rameswar Panda and Yoon Kim},
+ title = {Gated Linear Attention Transformers with Hardware-Efficient Training},
+ year = {2023}
+}
+
+@article{zeng-2019-graphsaint,
+ abstract = {Graph Convolutional Networks (GCNs) are powerful models for learning
+representations of attributed graphs. To scale GCNs to large graphs,
+state-of-the-art methods use various layer sampling techniques to alleviate the
+"neighbor explosion" problem during minibatch training. We propose GraphSAINT,
+a graph sampling based inductive learning method that improves training
+efficiency and accuracy in a fundamentally different way. By changing
+perspective, GraphSAINT constructs minibatches by sampling the training graph,
+rather than the nodes or edges across GCN layers. Each iteration, a complete
+GCN is built from the properly sampled subgraph. Thus, we ensure fixed number
+of well-connected nodes in all layers. We further propose normalization
+technique to eliminate bias, and sampling algorithms for variance reduction.
+Importantly, we can decouple the sampling from the forward and backward
+propagation, and extend GraphSAINT with many architecture variants (e.g., graph
+attention, jumping connection). GraphSAINT demonstrates superior performance in
+both accuracy and training time on five large graphs, and achieves new
+state-of-the-art F1 scores for PPI (0.995) and Reddit (0.970).},
+ arxiv_url = {https://arxiv.org/pdf/1907.04931v4.pdf},
+ author = {Hanqing Zeng and Hongkuan Zhou and Ajitesh Srivastava and Rajgopal Kannan and Viktor Prasanna},
+ github_url = {https://github.com/GraphSAINT/GraphSAINT},
+ title = {GraphSAINT: Graph Sampling Based Inductive Learning Method},
+ year = {2019}
+}
+
+@article{zhang-2024-two,
+ abstract = {Graph Neural Networks (GNNs) excel in various graph learning tasks but face
+computational challenges when applied to large-scale graphs. A promising
+solution is to remove non-essential edges to reduce the computational overheads
+in GNN. Previous literature generally falls into two categories:
+topology-guided and semantic-guided. The former maintains certain graph
+topological properties yet often underperforms on GNNs due to low integration
+with neural network training. The latter performs well at lower sparsity on
+GNNs but faces performance collapse at higher sparsity levels. With this in
+mind, we take the first step to propose a new research line and concept termed
+Graph Sparse Training (GST), which dynamically manipulates sparsity at the data
+level. Specifically, GST initially constructs a topology & semantic anchor at a
+low training cost, followed by performing dynamic sparse training to align the
+sparse graph with the anchor. We introduce the Equilibria Sparsification
+Principle to guide this process, effectively balancing the preservation of both
+topological and semantic information. Ultimately, GST produces a sparse graph
+with maximum topological integrity and no performance degradation. Extensive
+experiments on 6 datasets and 5 backbones showcase that GST (I) identifies
+subgraphs at higher graph sparsity levels (1.67%~15.85% $\uparrow$) than
+state-of-the-art sparsification methods, (II) preserves more key spectral
+properties, (III) achieves 1.27-3.42$\times$ speedup in GNN inference and (IV)
+successfully helps graph adversarial defense and graph lottery tickets.},
+ arxiv_url = {https://arxiv.org/pdf/2402.01242v1.pdf},
+ author = {Guibin Zhang and Yanwei Yue and Kun Wang and Junfeng Fang and Yongduo Sui and Kai Wang and Yuxuan Liang and Dawei Cheng and Shirui Pan and Tianlong Chen},
+ title = {Two Heads Are Better Than One: Boosting Graph Sparse Training via Semantic and Topological Awareness},
+ year = {2024}
+}
+
+% ===========================================
+% REFERENCE CANDIDATES
+% Additional reference papers for context
+% ===========================================
+
+@article{author-year-algorithm,
+ title = {Algorithm 799: revolve: an implementation of check-pointing for the reverse or adjoint mode of computational differentiation}
+}
+
+@article{author-year-review,
+ title = {Review papers: The statistical basis of meta-analysis}
+}
+
+@article{baker-2017-accelerating,
+ abstract = {Methods for neural network hyperparameter optimization and meta-modeling are
+computationally expensive due to the need to train a large number of model
+configurations. In this paper, we show that standard frequentist regression
+models can predict the final performance of partially trained model
+configurations using features based on network architectures, hyperparameters,
+and time-series validation performance data. We empirically show that our
+performance prediction models are much more effective than prominent Bayesian
+counterparts, are simpler to implement, and are faster to train. Our models can
+predict final performance in both visual classification and language modeling
+domains, are effective for predicting performance of drastically varying model
+architectures, and can even generalize between model classes. Using these
+prediction models, we also propose an early stopping method for hyperparameter
+optimization and meta-modeling, which obtains a speedup of a factor up to 6x in
+both hyperparameter optimization and meta-modeling. Finally, we empirically
+show that our early stopping method can be seamlessly incorporated into both
+reinforcement learning-based architecture selection algorithms and bandit based
+search methods. Through extensive experimentation, we empirically show our
+performance prediction models and early stopping algorithm are state-of-the-art
+in terms of prediction accuracy and speedup achieved while still identifying
+the optimal model configurations.},
+ arxiv_url = {https://arxiv.org/pdf/1705.10823v2.pdf},
+ author = {Bowen Baker and Otkrist Gupta and Ramesh Raskar and Nikhil Naik},
+ title = {Accelerating neural architecture search using performance prediction},
+ year = {2017}
+}
+
+@article{clune-2019-gas,
+ abstract = {Perhaps the most ambitious scientific quest in human history is the creation
+of general artificial intelligence, which roughly means AI that is as smart or
+smarter than humans. The dominant approach in the machine learning community is
+to attempt to discover each of the pieces required for intelligence, with the
+implicit assumption that some future group will complete the Herculean task of
+figuring out how to combine all of those pieces into a complex thinking
+machine. I call this the "manual AI approach". This paper describes another
+exciting path that ultimately may be more successful at producing general AI.
+It is based on the clear trend in machine learning that hand-designed solutions
+eventually are replaced by more effective, learned solutions. The idea is to
+create an AI-generating algorithm (AI-GA), which automatically learns how to
+produce general AI. Three Pillars are essential for the approach: (1)
+meta-learning architectures, (2) meta-learning the learning algorithms
+themselves, and (3) generating effective learning environments. I argue that
+either approach could produce general AI first, and both are scientifically
+worthwhile irrespective of which is the fastest path. Because both are
+promising, yet the ML community is currently committed to the manual approach,
+I argue that our community should increase its research investment in the AI-GA
+approach. To encourage such research, I describe promising work in each of the
+Three Pillars. I also discuss AI-GA-specific safety and ethical considerations.
+Because it it may be the fastest path to general AI and because it is
+inherently scientifically interesting to understand the conditions in which a
+simple algorithm can produce general AI (as happened on Earth where Darwinian
+evolution produced human intelligence), I argue that the pursuit of AI-GAs
+should be considered a new grand challenge of computer science research.},
+ arxiv_url = {https://arxiv.org/pdf/1905.10985v2.pdf},
+ author = {Jeff Clune},
+ title = {Ai-gas: Ai-generating algorithms, an alternate paradigm for producing general artiﬁcial intelligence},
+ year = {2019}
+}
+
+@article{elsayed-2018-adversarial,
+ abstract = {Deep neural networks are susceptible to \emph{adversarial} attacks. In
+computer vision, well-crafted perturbations to images can cause neural networks
+to make mistakes such as confusing a cat with a computer. Previous adversarial
+attacks have been designed to degrade performance of models or cause machine
+learning models to produce specific outputs chosen ahead of time by the
+attacker. We introduce attacks that instead {\em reprogram} the target model to
+perform a task chosen by the attacker---without the attacker needing to specify
+or compute the desired output for each test-time input. This attack finds a
+single adversarial perturbation, that can be added to all test-time inputs to a
+machine learning model in order to cause the model to perform a task chosen by
+the adversary---even if the model was not trained to do this task. These
+perturbations can thus be considered a program for the new task. We demonstrate
+adversarial reprogramming on six ImageNet classification models, repurposing
+these models to perform a counting task, as well as classification tasks:
+classification of MNIST and CIFAR-10 examples presented as inputs to the
+ImageNet model.},
+ arxiv_url = {https://arxiv.org/pdf/1806.11146v2.pdf},
+ author = {Gamaleldin F. Elsayed and Ian Goodfellow and Jascha Sohl-Dickstein},
+ journal = {International Conference on Learning Representations 2019},
+ title = {Adversarial reprogramming of neural networks},
+ year = {2018}
+}
+
+@article{elsken-2018-multi,
+ abstract = {Neural Architecture Search aims at automatically finding neural architectures
+that are competitive with architectures designed by human experts. While recent
+approaches have achieved state-of-the-art predictive performance for image
+recognition, they are problematic under resource constraints for two reasons:
+(1)the neural architectures found are solely optimized for high predictive
+performance, without penalizing excessive resource consumption, (2) most
+architecture search methods require vast computational resources. We address
+the first shortcoming by proposing LEMONADE, an evolutionary algorithm for
+multi-objective architecture search that allows approximating the entire
+Pareto-front of architectures under multiple objectives, such as predictive
+performance and number of parameters, in a single run of the method. We address
+the second shortcoming by proposing a Lamarckian inheritance mechanism for
+LEMONADE which generates children networks that are warmstarted with the
+predictive performance of their trained parents. This is accomplished by using
+(approximate) network morphism operators for generating children. The
+combination of these two contributions allows finding models that are on par or
+even outperform both hand-crafted as well as automatically-designed networks.},
+ arxiv_url = {https://arxiv.org/pdf/1804.09081v4.pdf},
+ author = {Thomas Elsken and Jan Hendrik Metzen and Frank Hutter},
+ title = {Efﬁcient multi-objective neural architecture search via lamarckian evolution},
+ year = {2018}
+}
+
+@article{fan-2018-learning,
+ abstract = {Teaching plays a very important role in our society, by spreading human
+knowledge and educating our next generations. A good teacher will select
+appropriate teaching materials, impact suitable methodologies, and set up
+targeted examinations, according to the learning behaviors of the students. In
+the field of artificial intelligence, however, one has not fully explored the
+role of teaching, and pays most attention to machine \emph{learning}. In this
+paper, we argue that equal attention, if not more, should be paid to teaching,
+and furthermore, an optimization framework (instead of heuristics) should be
+used to obtain good teaching strategies. We call this approach `learning to
+teach'. In the approach, two intelligent agents interact with each other: a
+student model (which corresponds to the learner in traditional machine learning
+algorithms), and a teacher model (which determines the appropriate data, loss
+function, and hypothesis space to facilitate the training of the student
+model). The teacher model leverages the feedback from the student model to
+optimize its own teaching strategies by means of reinforcement learning, so as
+to achieve teacher-student co-evolution. To demonstrate the practical value of
+our proposed approach, we take the training of deep neural networks (DNN) as an
+example, and show that by using the learning to teach techniques, we are able
+to use much less training data and fewer iterations to achieve almost the same
+accuracy for different kinds of DNN models (e.g., multi-layer perceptron,
+convolutional neural networks and recurrent neural networks) under various
+machine learning tasks (e.g., image classification and text understanding).},
+ arxiv_url = {https://arxiv.org/pdf/1805.03643v1.pdf},
+ author = {Yang Fan and Fei Tian and Tao Qin and Xiang-Yang Li and Tie-Yan Liu},
+ title = {Learning to teach},
+ year = {2018}
+}
+
+@article{finn-2017-meta,
+ abstract = {Learning to learn is a powerful paradigm for enabling models to learn from
+data more effectively and efficiently. A popular approach to meta-learning is
+to train a recurrent model to read in a training dataset as input and output
+the parameters of a learned model, or output predictions for new test inputs.
+Alternatively, a more recent approach to meta-learning aims to acquire deep
+representations that can be effectively fine-tuned, via standard gradient
+descent, to new tasks. In this paper, we consider the meta-learning problem
+from the perspective of universality, formalizing the notion of learning
+algorithm approximation and comparing the expressive power of the
+aforementioned recurrent models to the more recent approaches that embed
+gradient descent into the meta-learner. In particular, we seek to answer the
+following question: does deep representation combined with standard gradient
+descent have sufficient capacity to approximate any learning algorithm? We find
+that this is indeed true, and further find, in our experiments, that
+gradient-based meta-learning consistently leads to learning strategies that
+generalize more widely compared to those represented by recurrent models.},
+ arxiv_url = {https://arxiv.org/pdf/1710.11622v3.pdf},
+ author = {Chelsea Finn and Sergey Levine},
+ title = {Meta-learning and universality: Deep representations and gradient descent can approximate any learning algorithm},
+ year = {2017}
+}
+
+@article{finn-2017-model,
+ abstract = {We propose an algorithm for meta-learning that is model-agnostic, in the
+sense that it is compatible with any model trained with gradient descent and
+applicable to a variety of different learning problems, including
+classification, regression, and reinforcement learning. The goal of
+meta-learning is to train a model on a variety of learning tasks, such that it
+can solve new learning tasks using only a small number of training samples. In
+our approach, the parameters of the model are explicitly trained such that a
+small number of gradient steps with a small amount of training data from a new
+task will produce good generalization performance on that task. In effect, our
+method trains the model to be easy to fine-tune. We demonstrate that this
+approach leads to state-of-the-art performance on two few-shot image
+classification benchmarks, produces good results on few-shot regression, and
+accelerates fine-tuning for policy gradient reinforcement learning with neural
+network policies.},
+ arxiv_url = {https://arxiv.org/pdf/1703.03400v3.pdf},
+ author = {Chelsea Finn and Pieter Abbeel and Sergey Levine},
+ title = {Model-agnostic meta-learning for fast adaptation of deep networks},
+ year = {2017}
+}
+
+@article{graves-2017-automated,
+ abstract = {We introduce a method for automatically selecting the path, or syllabus, that
+a neural network follows through a curriculum so as to maximise learning
+efficiency. A measure of the amount that the network learns from each data
+sample is provided as a reward signal to a nonstationary multi-armed bandit
+algorithm, which then determines a stochastic syllabus. We consider a range of
+signals derived from two distinct indicators of learning progress: rate of
+increase in prediction accuracy, and rate of increase in network complexity.
+Experimental results for LSTM networks on three curricula demonstrate that our
+approach can significantly accelerate learning, in some cases halving the time
+required to attain a satisfactory performance level.},
+ arxiv_url = {https://arxiv.org/pdf/1704.03003v1.pdf},
+ author = {Alex Graves and Marc G. Bellemare and Jacob Menick and Remi Munos and Koray Kavukcuoglu},
+ title = {Automated curriculum learning for neural networks},
+ year = {2017}
+}
+
+@article{he-2015-delving,
+ abstract = {Rectified activation units (rectifiers) are essential for state-of-the-art
+neural networks. In this work, we study rectifier neural networks for image
+classification from two aspects. First, we propose a Parametric Rectified
+Linear Unit (PReLU) that generalizes the traditional rectified unit. PReLU
+improves model fitting with nearly zero extra computational cost and little
+overfitting risk. Second, we derive a robust initialization method that
+particularly considers the rectifier nonlinearities. This method enables us to
+train extremely deep rectified models directly from scratch and to investigate
+deeper or wider network architectures. Based on our PReLU networks
+(PReLU-nets), we achieve 4.94% top-5 test error on the ImageNet 2012
+classification dataset. This is a 26% relative improvement over the ILSVRC 2014
+winner (GoogLeNet, 6.66%). To our knowledge, our result is the first to surpass
+human-level performance (5.1%, Russakovsky et al.) on this visual recognition
+challenge.},
+ arxiv_url = {https://arxiv.org/pdf/1502.01852v1.pdf},
+ author = {Kaiming He and Xiangyu Zhang and Shaoqing Ren and Jian Sun},
+ title = {Delving deep into rectiﬁers: Surpassing human-level performance on imagenet classiﬁcation},
+ year = {2015}
+}
+
+@article{hinton-2015-distilling,
+ abstract = {A very simple way to improve the performance of almost any machine learning
+algorithm is to train many different models on the same data and then to
+average their predictions. Unfortunately, making predictions using a whole
+ensemble of models is cumbersome and may be too computationally expensive to
+allow deployment to a large number of users, especially if the individual
+models are large neural nets. Caruana and his collaborators have shown that it
+is possible to compress the knowledge in an ensemble into a single model which
+is much easier to deploy and we develop this approach further using a different
+compression technique. We achieve some surprising results on MNIST and we show
+that we can significantly improve the acoustic model of a heavily used
+commercial system by distilling the knowledge in an ensemble of models into a
+single model. We also introduce a new type of ensemble composed of one or more
+full models and many specialist models which learn to distinguish fine-grained
+classes that the full models confuse. Unlike a mixture of experts, these
+specialist models can be trained rapidly and in parallel.},
+ arxiv_url = {https://arxiv.org/pdf/1503.02531v1.pdf},
+ author = {Geoffrey Hinton and Oriol Vinyals and Jeff Dean},
+ title = {Distilling the knowledge in a neural network},
+ year = {2015}
+}
