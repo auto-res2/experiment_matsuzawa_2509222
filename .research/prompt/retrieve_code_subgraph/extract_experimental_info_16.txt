@@ -1,0 +1,1870 @@
+
+Input:
+You are a researcher with expertise in engineering in the field of machine learning.
+
+# Instructions
+- The content described in “Repository Content” corresponds to the GitHub repository of the method described in “Method.”
+- Please extract the following two pieces of information from “Repository Content”:
+    - experimental_code：Extract the implementation sections that are directly related to the method described in “Method.”
+    - experimental_info：Extract and output the experimental settings related to the method described in “Method.”
+
+# Method
+HyperAttention's methodology involves two main components: efficiently estimating the diagonal scaling matrix D and approximating the matrix product of the softmax matrix (D^-1A) and value matrix (V) via subsampling. For estimating D, the algorithm first identifies dominant entries in the attention matrix using "sortLSH," a Hamming sorted Locality Sensitive Hashing (LSH) variant (Algorithm 1), to generate a sparse mask. It then combines masked attention values with a randomly chosen subset of keys to approximate D (Algorithm 2). For approximating the product of D^-1A and V, a sampling matrix S is constructed based on the squared row norms of V, leveraging Approximate Matrix Multiplication (AMM) techniques, often using uniform sampling in practice. Causal masking is handled recursively (Algorithm 4), by decomposing the masked attention matrix into smaller causal blocks and an unmasked block, applying the respective approximation methods. The theoretical guarantees are analyzed using two fine-grained parameters: the maximum column L2-norm in the normalized attention matrix and the ratio of row norms in the unnormalized attention matrix after removing large entries.
+
+# Repository Content
+File Path: benchmark_patch_llm.py
+Content:
+
+import argparse
+from tqdm import tqdm
+import numpy as np
+import torch
+from torch.nn import CrossEntropyLoss
+from datasets import load_dataset, concatenate_datasets
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+from models.replace_llm_attention import patch_attention_layers
+
+
+def get_model_and_tokenizer(model_name):
+
+    if model_name == "chatglm2-6b-32k":
+        tokenizer = AutoTokenizer.from_pretrained("THUDM/chatglm2-6b-32k", trust_remote_code=True)
+        model = AutoModelForCausalLM.from_pretrained("THUDM/chatglm2-6b-32k", trust_remote_code=True)
+    else:
+        raise NotImplementedError("Currently we only support chatglm2")
+        
+    return model, tokenizer
+
+
+def get_arguments():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--seq_len", type=int, default=32768)
+    # patch config
+    parser.add_argument("--patch_config", type=str, default="last", choices=['last', 'first', 'even', 'odd'])
+    parser.add_argument("--attn_method", type=str, default="hyper", choices=['flash', 'hyper', 'hyper-cuda'])
+    parser.add_argument("--num_patch_layers", type=int, default=-1)
+    # params of HyperAttention
+    parser.add_argument("--block_size", type=int, default=256)
+    parser.add_argument("--sample_size", type=int, default=256)
+    parser.add_argument("--lsh_num_projs", type=int, default=7)
+    parser.add_argument("--min_seq_len", type=int, default=4096)
+    # currently only supports **chatglm2-6b-32k**
+    parser.add_argument("--model_name", type=str, default="chatglm2-6b-32k")
+    return parser.parse_args()
+
+
+@torch.no_grad()
+def main():
+    args = get_arguments()
+    for arg_name, arg_var in args.__dict__.items():
+        print(f"{arg_name:<16} : {arg_var}")
+
+    model, tokenizer = get_model_and_tokenizer(args.model_name)
+    tokenizer.model_max_length = args.seq_len
+    device = "cuda"
+    dtype = torch.bfloat16
+
+    # Load LongBench datasets
+    dataset = 'longbench'
+    dataset_names = ["narrativeqa", "qasper", "multifieldqa_en", "multifieldqa_zh", "hotpotqa", "2wikimqa", "musique", \
+        "dureader", "gov_report", "qmsum", "multi_news", "vcsum", "trec", "triviaqa", "samsum", "lsht", \
+        "passage_count", "passage_retrieval_en", "passage_retrieval_zh", "lcc", "repobench-p"]
+    
+    data_subset_all = []
+    for dataset in dataset_names:
+        data_ = load_dataset('THUDM/LongBench', f"{dataset}", split='test')
+        data_subset = data_.filter(lambda x: len(tokenizer.encode(x['context'])) >= args.seq_len)
+        if len(data_subset) > 0:
+            data_subset_all.append(data_subset)
+    data = concatenate_datasets(data_subset_all)
+
+    encoded_texts = []
+    pbar = tqdm(data)
+    for i, data_i in enumerate(pbar):
+        encoded_text = tokenizer.encode(data_i['context'], return_tensors='pt', truncation=True)
+        pbar.set_description(f"seq_len: {len(encoded_text[0])}, n_data: {len(encoded_texts)}")
+        if len(encoded_text[0]) < args.seq_len:
+            continue
+        encoded_texts.append(encoded_text)
+    print(f"# of data longer than {args.seq_len}: {len(encoded_texts)}")
+    
+    if args.attn_method != 'flash':
+        patch_attention_layers(model=model, **args.__dict__)
+
+    model.to(device=device, dtype=dtype)
+    model.eval()
+    loss_fct = CrossEntropyLoss(reduction="none")
+
+    ppls = []
+
+    pbar = tqdm(range(len(encoded_texts)))
+    for bid in pbar:
+        encoded_batch = encoded_texts[bid:bid+1]
+        if type(encoded_batch) == dict:
+            attn_mask = encoded_batch['attention_mask'] if 'attention_mask' in encoded_batch.keys() else None
+            encoded_batch = encoded_batch['input_ids']
+        elif type(encoded_batch) == list:
+            encoded_batch = encoded_batch[0]
+        
+        encoded_batch = encoded_batch.to(device)
+        attn_mask = torch.ones_like(encoded_batch)
+
+        out_logits = model(encoded_batch).logits
+
+        labels = encoded_batch
+
+        shift_logits = out_logits[..., :-1, :].contiguous()
+        shift_labels = labels[..., 1:].contiguous()
+        shift_attention_mask_batch = attn_mask[..., 1:].contiguous()
+
+        loss_ = loss_fct(shift_logits.transpose(1, 2), shift_labels).float()
+        perplexity_batch = torch.exp2(
+            (loss_ * shift_attention_mask_batch).sum(1)
+            / shift_attention_mask_batch.sum(1)
+        )
+        ppls += perplexity_batch.tolist()
+
+        pbar.set_description(f"[{bid:<4}/{len(encoded_texts)}] avg_ppls: {np.mean(np.array(ppls)[~np.isnan(np.array(ppls))]):.4f}")
+        
+        del out_logits, encoded_batch, attn_mask, shift_logits, shift_labels, shift_attention_mask_batch, perplexity_batch
+        
+
+    nan_cnt = sum(np.isnan(np.array(ppls)))
+    ppl_mean = np.mean(np.array(ppls)[~np.isnan(np.array(ppls))])
+
+    print(f"ppl: {ppl_mean}, nan_cnt: {nan_cnt}")
+    res_str = f"model: {args.model_name}, dtype: {dtype}, seq_len: {args.seq_len}, num_patch_layers: {args.num_patch_layers}, n_data: {len(encoded_texts)}, ppl: {ppl_mean}, nan_cnt: {nan_cnt}\n"
+    print(res_str)
+
+if __name__ == "__main__":
+    main()
+
+File Path: benchmark_single_attention.py
+Content:
+import os
+import argparse
+from tqdm import tqdm
+import torch
+import triton
+
+from models.attention.flash_attn_triton_for_hyper import flash_attn_func
+from models.attention.hyper_attn import HyperAttention
+
+try:
+    from flash_attn import flash_attn_func as flash_attn_func_cuda
+except ImportError:
+    flash_attn_func_cuda = None
+
+
+def get_arguments():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--no_causal", action="store_true")
+    parser.add_argument("--mode", type=str, default="fwd+bwd", choices=['fwd', 'bwd', 'fwd+bwd'])
+    parser.add_argument("--attn_method", type=str, default="flash", choices=['flash', 'flash-cuda', 'hyper', 'hyper-cuda'])
+    return parser.parse_args()
+
+
+def get_tensors(batch_size, seq_len, head_size, dim):
+    q = torch.randn((batch_size, seq_len, head_size, dim), dtype=torch.bfloat16, device="cuda", requires_grad=True)
+    k = torch.randn((batch_size, seq_len, head_size, dim), dtype=torch.bfloat16, device="cuda", requires_grad=True)
+    v = torch.randn((batch_size, seq_len, head_size, dim), dtype=torch.bfloat16, device="cuda", requires_grad=True)
+    return q, k, v
+
+
+def run_flash_attn(batch_size, head_size, seq_len, dim, causal, mode, impl="triton", warmup=20, rep=100):
+    q, k, v = get_tensors(batch_size, seq_len, head_size, dim)
+    if impl == "cuda":
+        if flash_attn_func_cuda is None:
+            raise ImportError("Please install flash_attn (pip install flash-attn --no-build-isolation)")
+        fn = lambda: flash_attn_func_cuda(q, k, v, causal=causal)
+    else:
+        fn = lambda: flash_attn_func(q, k, v, None, causal, None)[0]
+    if mode == 'fwd':
+        return triton.testing.do_bench(fn, warmup=warmup, rep=rep, percentiles=[0.2, 0.5, 0.8])
+    elif mode == 'bwd':
+        o = fn()
+        do = torch.randn_like(o)
+        fn = lambda: o.backward(do, retain_graph=True)
+        return triton.testing.do_bench(fn, warmup=warmup, rep=rep, percentiles=[0.2, 0.5, 0.8])
+    else: # mode == 'fwd+bwd'
+        q20_fwd, median_fwd, q80_fwd = triton.testing.do_bench(fn, warmup=warmup, rep=rep, percentiles=[0.2, 0.5, 0.8])
+        o = fn()
+        do = torch.randn_like(o)
+        fn = lambda: o.backward(do, retain_graph=True)
+        q20_bwd, median_bwd, q80_bwd = triton.testing.do_bench(fn, warmup=warmup, rep=rep, percentiles=[0.2, 0.5, 0.8])
+        return q20_fwd+q20_bwd, median_fwd+median_bwd, q80_fwd+q80_bwd
+
+
+def run_hyper_attn(batch_size, head_size, seq_len, dim, causal, mode, impl="triton", warmup=20, rep=100):
+    q, k, v = get_tensors(batch_size, head_size, seq_len, dim)
+    block_size = 256
+    sample_size = 256
+    cuda = impl=="cuda"
+
+    attn = HyperAttention(
+        input_dim=dim,
+        block_size=block_size,
+        sample_size=sample_size,
+        min_seq_len=4096,
+        cuda=cuda).to(device='cuda', dtype=q.dtype)
+    
+    fn = lambda: attn(q, k, v, causal=causal)
+
+    if mode == 'fwd':
+        return triton.testing.do_bench(fn, warmup=warmup, rep=rep, percentiles=[0.2, 0.5, 0.8])
+    elif mode == 'bwd':
+        o = fn()
+        do = torch.randn_like(o)
+        fn = lambda: o.backward(do, retain_graph=True)
+        return triton.testing.do_bench(fn, warmup=warmup, rep=rep, percentiles=[0.2, 0.5, 0.8])
+    else: # mode == 'fwd+bwd'
+        q20_fwd, median_fwd, q80_fwd = triton.testing.do_bench(fn, warmup=warmup, rep=rep, percentiles=[0.2, 0.5, 0.8])
+        o = fn()
+        do = torch.randn_like(o)
+        fn = lambda: o.backward(do, retain_graph=True)
+        q20_bwd, median_bwd, q80_bwd = triton.testing.do_bench(fn, warmup=warmup, rep=rep, percentiles=[0.2, 0.5, 0.8])
+        return q20_fwd+q20_bwd, median_fwd+median_bwd, q80_fwd+q80_bwd
+
+
+def main():
+    args = get_arguments()
+    for arg_name, arg_var in args.__dict__.items():
+        print(f"{arg_name:<16} : {arg_var}")
+
+    seq_lens = [2**i for i in range(10, 18)]
+    
+    attn_method = args.attn_method # ['flash', 'hyper']
+    mode = args.mode # ['fwd', 'bwd', 'fwd+bwd']
+    batch_size, head_size, dim = 1, 32, 64
+    print(f"mode: {mode}, attn_method: {attn_method}, batch_size: {batch_size}, head_size: {head_size}, dim: {dim}")
+
+    causal = not args.no_causal
+
+    for seq_len in seq_lens:
+        if attn_method == 'flash':
+            ms = run_flash_attn(batch_size, head_size, seq_len, dim, causal, mode=args.mode)
+        elif attn_method == 'flash-cuda':
+            ms = run_flash_attn(batch_size, head_size, seq_len, dim, causal, mode=args.mode, impl="cuda")
+        elif attn_method == 'hyper':
+            ms = run_hyper_attn(batch_size, head_size, seq_len, dim, causal, mode=args.mode)
+        elif attn_method == 'hyper-cuda':
+            ms = run_hyper_attn(batch_size, head_size, seq_len, dim, causal, mode=args.mode, impl="cuda")
+        else:
+            raise NotImplementedError
+        
+        print(f"[{mode:<8}], {attn_method}, seq_len: {seq_len:<8}, causal: {causal}, ms: {ms[0]:.5f} ({ms[1]:.5f}, {ms[2]:.5f}) | ")
+
+
+if __name__ == "__main__":
+    main()
+
+
+
+File Path: models/attention/angular_lsh.py
+Content:
+import torch
+
+
+class AngularLSH(torch.nn.Module):
+
+    def __init__(self, num_projs, dim, rng=None):
+        super().__init__()
+        self.num_projs = num_projs
+
+        if num_projs > 0:
+            self.register_buffer('proj_dir', torch.randn(dim + (num_projs,), generator=rng), persistent=False)
+            self.register_buffer('perm', self._unit_hamming_distance_array(self.num_projs), persistent=False)
+            self.register_buffer('enc_vec', 2 ** torch.arange(self.num_projs).view(1, 1, 1, -1), persistent=False)
+            
+    def _unit_hamming_distance_array(self, size_n):
+        if size_n == 1:
+            return torch.tensor([0, 1])
+        a = self._unit_hamming_distance_array(size_n - 1)
+        return torch.concat([a, torch.flip(a, dims=[0]) + 2 ** (size_n - 1)], 0)
+
+    def hash(self, mat):
+        if self.num_projs < 0:
+            return torch.zeros(mat.shape[:-1], device=mat.device, dtype=torch.int32)
+        mask = torch.einsum('...nd,...dr -> ...nr', mat, self.proj_dir)
+        mask = mask > 0
+        bin_ids = (mask * self.enc_vec).sum(-1)
+        return self.perm[bin_ids]
+    
+    def __repr__(self):
+        return f"AngularLSH(num_proj={self.num_projs}, proj_dir.shape={self.proj_dir.shape})"
+
+File Path: models/attention/flash_attn_triton_for_hyper.py
+Content:
+"""
+*Experimental* implementation of FlashAttention in Triton.
+Tested with triton==2.0.0.dev20221202.
+Triton 2.0 has a new backend (MLIR) but seems like it doesn't yet work for head dimensions
+other than 64:
+https://github.com/openai/triton/blob/d376020f90002757eea3ea9475d4f7cfc2ec5ead/python/triton/ops/flash_attention.py#L207
+We'll update this implementation with the new Triton backend once this is fixed.
+
+We use the FlashAttention implementation from Phil Tillet a starting point.
+https://github.com/openai/triton/blob/master/python/tutorials/06-fused-attention.py
+
+Changes:
+- Implement both causal and non-causal attention.
+- Implement both self-attention and cross-attention.
+- Support arbitrary seqlens (not just multiples of 128), for both forward and backward.
+- Support all head dimensions up to 128 (not just 16, 32, 64, 128), for both forward and backward.
+- Support attention bias.
+- Speed up the forward pass a bit, and only store the LSE instead of m and l.
+- Make the backward for d=128 much faster by reducing register spilling.
+- Optionally parallelize the backward pass across seqlen_k, to deal with the case of
+small batch size * nheads.
+
+Caution:
+- This is an *experimental* implementation. The forward pass should be quite robust but
+I'm not 100% sure that the backward pass doesn't have race conditions (due to the Triton compiler).
+- This implementation has only been tested on A100.
+- If you plan to use headdim other than 64 and 128, you should test for race conditions
+(due to the Triton compiler), as done in tests/test_flash_attn.py
+"test_flash_attn_triton_race_condition". I've tested and fixed many race conditions
+for different head dimensions (40, 48, 64, 128, 80, 88, 96), but I'm still not 100% confident
+that there are none left for other head dimensions.
+
+Differences between this Triton version and the CUDA version:
+- Triton version doesn't support dropout.
+- Triton forward is generally faster than CUDA forward, while Triton backward is
+generally slower than CUDA backward. Overall Triton forward + backward is slightly slower
+than CUDA forward + backward.
+- Triton version doesn't support different sequence lengths in a batch (i.e., RaggedTensor/NestedTensor).
+- Triton version supports attention bias, while CUDA version doesn't.
+"""
+
+import math
+
+import torch
+import triton
+import triton.language as tl
+
+
+# Disabling autotune for now, set num_warps=4 if headdim=64 and num_warps=8 if headdim=128
+# @triton.autotune(
+#     configs=[
+#         triton.Config({"BLOCK_M": 128, "BLOCK_N": 128}, num_warps=4, num_stages=1),
+#         # This config has a race condition when EVEN_M == False, disabling it for now.
+#         # triton.Config({"BLOCK_M": 64, "BLOCK_N": 64}, num_warps=4, num_stages=1),
+#     ],
+#     key=['CACHE_KEY_SEQLEN_Q', 'CACHE_KEY_SEQLEN_K', 'BIAS_TYPE', 'IS_CAUSAL', 'BLOCK_HEADDIM']
+# )
+@triton.heuristics(
+    {
+        "EVEN_M": lambda args: args["seqlen_q"] % args["BLOCK_M"] == 0,
+        "EVEN_N": lambda args: args["seqlen_k"] % args["BLOCK_N"] == 0,
+        "EVEN_HEADDIM": lambda args: args["headdim"] == args["BLOCK_HEADDIM"],
+    }
+)
+@triton.jit
+def _fwd_kernel(
+    Q,
+    K,
+    V,
+    Bias,
+    Out,
+    Lse,
+    TMP,  # NOTE: TMP is a scratchpad buffer to workaround a compiler bug
+    softmax_scale,
+    stride_qb,
+    stride_qh,
+    stride_qm,
+    stride_kb,
+    stride_kh,
+    stride_kn,
+    stride_vb,
+    stride_vh,
+    stride_vn,
+    stride_bb,
+    stride_bh,
+    stride_bm,
+    stride_ob,
+    stride_oh,
+    stride_om,
+    nheads,
+    seqlen_q,
+    seqlen_k,
+    seqlen_q_rounded,
+    headdim,
+    CACHE_KEY_SEQLEN_Q,
+    CACHE_KEY_SEQLEN_K,
+    BIAS_TYPE: tl.constexpr,
+    IS_CAUSAL: tl.constexpr,
+    BLOCK_HEADDIM: tl.constexpr,
+    EVEN_M: tl.constexpr,
+    EVEN_N: tl.constexpr,
+    EVEN_HEADDIM: tl.constexpr,
+    BLOCK_M: tl.constexpr,
+    BLOCK_N: tl.constexpr,
+):
+    start_m = tl.program_id(0)
+    off_hb = tl.program_id(1)
+    off_b = off_hb // nheads
+    off_h = off_hb % nheads
+    # off_b = tl.program_id(1)
+    # off_h = tl.program_id(2)
+    # off_hb = off_b * nheads + off_h
+    # initialize offsets
+    offs_m = start_m * BLOCK_M + tl.arange(0, BLOCK_M)
+    offs_n = tl.arange(0, BLOCK_N)
+    offs_d = tl.arange(0, BLOCK_HEADDIM)
+    # Initialize pointers to Q, K, V
+    # Adding parenthesis around indexing might use int32 math instead of int64 math?
+    # https://github.com/openai/triton/issues/741
+    # I'm seeing a tiny bit of difference (5-7us)
+    q_ptrs = (
+        Q + off_b * stride_qb + off_h * stride_qh + (offs_m[:, None] * stride_qm + offs_d[None, :])
+    )
+    k_ptrs = (
+        K + off_b * stride_kb + off_h * stride_kh + (offs_n[:, None] * stride_kn + offs_d[None, :])
+    )
+    v_ptrs = (
+        V + off_b * stride_vb + off_h * stride_vh + (offs_n[:, None] * stride_vn + offs_d[None, :])
+    )
+    if BIAS_TYPE == "vector":
+        b_ptrs = Bias + off_b * stride_bb + off_h * stride_bh + offs_n
+    elif BIAS_TYPE == "matrix":
+        b_ptrs = (
+            Bias
+            + off_b * stride_bb
+            + off_h * stride_bh
+            + (offs_m[:, None] * stride_bm + offs_n[None, :])
+        )
+    # initialize pointer to m and l
+    t_ptrs = TMP + off_hb * seqlen_q_rounded + offs_m
+    lse_i = tl.zeros([BLOCK_M], dtype=tl.float32) - float("inf")
+    m_i = tl.zeros([BLOCK_M], dtype=tl.float32) - float("inf")
+    acc_o = tl.zeros([BLOCK_M, BLOCK_HEADDIM], dtype=tl.float32)
+    # load q: it will stay in SRAM throughout
+    # [2022-10-30] TD: Triton bug - in the case of EVEN_M=True and EVEN_N=False, if we just call
+    # tl.load(q_ptrs), we get the wrong output!
+    if EVEN_M & EVEN_N:
+        if EVEN_HEADDIM:
+            q = tl.load(q_ptrs)
+        else:
+            q = tl.load(q_ptrs, mask=offs_d[None, :] < headdim, other=0.0)
+    else:
+        if EVEN_HEADDIM:
+            q = tl.load(q_ptrs, mask=offs_m[:, None] < seqlen_q, other=0.0)
+        else:
+            q = tl.load(
+                q_ptrs, mask=(offs_m[:, None] < seqlen_q) & (offs_d[None, :] < headdim), other=0.0
+            )
+    # loop over k, v and update accumulator
+    end_n = seqlen_k if not IS_CAUSAL else tl.minimum((start_m + 1) * BLOCK_M, seqlen_k)
+    for start_n in range(0, end_n, BLOCK_N):
+        start_n = tl.multiple_of(start_n, BLOCK_N)
+        # -- compute qk ----
+        if EVEN_N & EVEN_M:  # If we just do "if EVEN_N", there seems to be some race condition
+            if EVEN_HEADDIM:
+                k = tl.load(k_ptrs + start_n * stride_kn)
+            else:
+                k = tl.load(k_ptrs + start_n * stride_kn, mask=offs_d[None, :] < headdim, other=0.0)
+        else:
+            if EVEN_HEADDIM:
+                k = tl.load(
+                    k_ptrs + start_n * stride_kn,
+                    mask=(start_n + offs_n)[:, None] < seqlen_k,
+                    other=0.0,
+                )
+            else:
+                k = tl.load(
+                    k_ptrs + start_n * stride_kn,
+                    mask=((start_n + offs_n)[:, None] < seqlen_k) & (offs_d[None, :] < headdim),
+                    other=0.0,
+                )
+        qk = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32)
+        qk += tl.dot(q, k, trans_b=True)
+        # Trying to combine the two masks seem to make the result wrong
+        if not EVEN_N:  # Need to mask out otherwise the softmax is wrong
+            qk += tl.where((start_n + offs_n)[None, :] < seqlen_k, 0, float("-inf"))
+        if IS_CAUSAL:
+            qk += tl.where(offs_m[:, None] >= (start_n + offs_n)[None, :], 0, float("-inf"))
+        if BIAS_TYPE != "none":
+            if BIAS_TYPE == "vector":
+                if EVEN_N:
+                    bias = tl.load(b_ptrs + start_n).to(tl.float32)
+                else:
+                    bias = tl.load(
+                        b_ptrs + start_n, mask=(start_n + offs_n) < seqlen_k, other=0.0
+                    ).to(tl.float32)
+                bias = bias[None, :]
+            elif BIAS_TYPE == "matrix":
+                if EVEN_M & EVEN_N:
+                    bias = tl.load(b_ptrs + start_n).to(tl.float32)
+                else:
+                    bias = tl.load(
+                        b_ptrs + start_n,
+                        mask=(offs_m[:, None] < seqlen_q)
+                        & ((start_n + offs_n)[None, :] < seqlen_k),
+                        other=0.0,
+                    ).to(tl.float32)
+            # Slightly faster to multiply the softmax_scale in the tl.exp below since the compiler
+            # can then fuse the mult and add into an fma instruction. But if we have bias we need to
+            # to multiply with softmax_scale here.
+            qk = qk * softmax_scale + bias
+            m_ij = tl.maximum(tl.max(qk, 1), lse_i)
+            p = tl.exp(qk - m_ij[:, None])
+        else:
+            m_ij = tl.maximum(tl.max(qk, 1) * softmax_scale, lse_i)
+            p = tl.exp(qk * softmax_scale - m_ij[:, None])
+        l_ij = tl.sum(p, 1)
+
+        # scale acc_o
+        acc_o_scale = tl.exp(m_i - m_ij)
+
+        # # -- update output accumulator --
+        # BUG: have to store and immediately load
+        tl.store(t_ptrs, acc_o_scale)
+        acc_o_scale = tl.load(t_ptrs)
+        acc_o = acc_o * acc_o_scale[:, None]
+        # update acc_o
+        if EVEN_N & EVEN_M:  # If we just do "if EVEN_N", there seems to be some race condition
+            if EVEN_HEADDIM:
+                v = tl.load(v_ptrs + start_n * stride_vn)
+            else:
+                v = tl.load(v_ptrs + start_n * stride_vn, mask=offs_d[None, :] < headdim, other=0.0)
+        else:
+            if EVEN_HEADDIM:
+                v = tl.load(
+                    v_ptrs + start_n * stride_vn,
+                    mask=(start_n + offs_n)[:, None] < seqlen_k,
+                    other=0.0,
+                )
+            else:
+                v = tl.load(
+                    v_ptrs + start_n * stride_vn,
+                    mask=((start_n + offs_n)[:, None] < seqlen_k) & (offs_d[None, :] < headdim),
+                    other=0.0,
+                )
+        p = p.to(v.dtype)
+        acc_o += tl.dot(p, v)
+
+        # -- update statistics
+        m_i = m_ij
+        l_i_new = tl.exp(lse_i - m_ij) + l_ij
+        lse_i = m_ij + tl.log(l_i_new)
+
+    o_scale = tl.exp(m_i - lse_i)
+    # BUG: have to store and immediately load
+    tl.store(t_ptrs, o_scale)
+    o_scale = tl.load(t_ptrs)
+    acc_o = acc_o * o_scale[:, None]
+    # rematerialize offsets to save registers
+    start_m = tl.program_id(0)
+    offs_m = start_m * BLOCK_M + tl.arange(0, BLOCK_M)
+    # write back l and m
+    lse_ptrs = Lse + off_hb * seqlen_q_rounded + offs_m
+    tl.store(lse_ptrs, lse_i)
+    # initialize pointers to output
+    offs_d = tl.arange(0, BLOCK_HEADDIM)
+    out_ptrs = (
+        Out
+        + off_b * stride_ob
+        + off_h * stride_oh
+        + (offs_m[:, None] * stride_om + offs_d[None, :])
+    )
+    if EVEN_M:
+        if EVEN_HEADDIM:
+            tl.store(out_ptrs, acc_o)
+        else:
+            tl.store(out_ptrs, acc_o, mask=offs_d[None, :] < headdim)
+    else:
+        if EVEN_HEADDIM:
+            tl.store(out_ptrs, acc_o, mask=offs_m[:, None] < seqlen_q)
+        else:
+            tl.store(
+                out_ptrs, acc_o, mask=(offs_m[:, None] < seqlen_q) & (offs_d[None, :] < headdim)
+            )
+
+
+@triton.jit
+def _bwd_preprocess_do_o_dot(
+    Out,
+    DO,
+    Delta,
+    stride_ob,
+    stride_oh,
+    stride_om,
+    stride_dob,
+    stride_doh,
+    stride_dom,
+    nheads,
+    seqlen_q,
+    seqlen_q_rounded,
+    headdim,
+    BLOCK_M: tl.constexpr,
+    BLOCK_HEADDIM: tl.constexpr,
+):
+    start_m = tl.program_id(0)
+    off_hb = tl.program_id(1)
+    off_b = off_hb // nheads
+    off_h = off_hb % nheads
+    # initialize offsets
+    offs_m = start_m * BLOCK_M + tl.arange(0, BLOCK_M)
+    offs_d = tl.arange(0, BLOCK_HEADDIM)
+    # load
+    o = tl.load(
+        Out + off_b * stride_ob + off_h * stride_oh + offs_m[:, None] * stride_om + offs_d[None, :],
+        mask=(offs_m[:, None] < seqlen_q) & (offs_d[None, :] < headdim),
+        other=0.0,
+    ).to(tl.float32)
+    do = tl.load(
+        DO
+        + off_b * stride_dob
+        + off_h * stride_doh
+        + offs_m[:, None] * stride_dom
+        + offs_d[None, :],
+        mask=(offs_m[:, None] < seqlen_q) & (offs_d[None, :] < headdim),
+        other=0.0,
+    ).to(tl.float32)
+    delta = tl.sum(o * do, axis=1)
+    # write-back
+    tl.store(Delta + off_hb * seqlen_q_rounded + offs_m, delta)
+
+
+@triton.jit
+def _bwd_store_dx(
+    dx_ptrs,
+    dx,
+    offs_n,
+    offs_d,
+    seqlen,
+    headdim,
+    EVEN_M: tl.constexpr,
+    EVEN_N: tl.constexpr,
+    even_headdim,
+):
+    # [2022-11-01] TD: Same bug. In the case of EVEN_N=True and EVEN_M=False,
+    # if we just call tl.store(dv_ptrs), there's a race condition
+    if EVEN_N & EVEN_M:
+        if even_headdim:
+            tl.store(dx_ptrs, dx)
+        else:
+            tl.store(dx_ptrs, dx, mask=offs_d[None, :] < headdim)
+    else:
+        if even_headdim:
+            tl.store(dx_ptrs, dx, mask=offs_n[:, None] < seqlen)
+        else:
+            tl.store(dx_ptrs, dx, mask=(offs_n[:, None] < seqlen) & (offs_d[None, :] < headdim))
+
+
+@triton.jit
+def _bwd_kernel_one_col_block(
+    start_n,
+    Q,
+    K,
+    V,
+    Bias,
+    DO,
+    DQ,
+    DK,
+    DV,
+    LSE,
+    D,
+    softmax_scale,
+    stride_qm,
+    stride_kn,
+    stride_vn,
+    stride_bm,
+    stride_dom,
+    stride_dqm,
+    stride_dkn,
+    stride_dvn,
+    seqlen_q,
+    seqlen_k,
+    headdim,
+    ATOMIC_ADD: tl.constexpr,
+    BIAS_TYPE: tl.constexpr,
+    IS_CAUSAL: tl.constexpr,
+    BLOCK_HEADDIM: tl.constexpr,
+    EVEN_M: tl.constexpr,
+    EVEN_N: tl.constexpr,
+    EVEN_HEADDIM: tl.constexpr,
+    BLOCK_M: tl.constexpr,
+    BLOCK_N: tl.constexpr,
+):
+    # We need to make sure begin_m is a multiple of BLOCK_M (not BLOCK_N)
+    begin_m = 0 if not IS_CAUSAL else ((start_n * BLOCK_N) // BLOCK_M) * BLOCK_M
+    # initialize row/col offsets
+    offs_qm = begin_m + tl.arange(0, BLOCK_M)
+    offs_n = start_n * BLOCK_N + tl.arange(0, BLOCK_N)
+    offs_m = tl.arange(0, BLOCK_M)
+    offs_d = tl.arange(0, BLOCK_HEADDIM)
+    # initialize pointers to value-like data
+    q_ptrs = Q + (offs_qm[:, None] * stride_qm + offs_d[None, :])
+    k_ptrs = K + (offs_n[:, None] * stride_kn + offs_d[None, :])
+    v_ptrs = V + (offs_n[:, None] * stride_vn + offs_d[None, :])
+    do_ptrs = DO + (offs_qm[:, None] * stride_dom + offs_d[None, :])
+    dq_ptrs = DQ + (offs_qm[:, None] * stride_dqm + offs_d[None, :])
+    if BIAS_TYPE == "vector":
+        b_ptrs = Bias + offs_n
+    elif BIAS_TYPE == "matrix":
+        b_ptrs = Bias + (offs_qm[:, None] * stride_bm + offs_n[None, :])
+    # initialize dv and dk
+    dv = tl.zeros([BLOCK_N, BLOCK_HEADDIM], dtype=tl.float32)
+    dk = tl.zeros([BLOCK_N, BLOCK_HEADDIM], dtype=tl.float32)
+    # There seems to be some problem with Triton pipelining that makes results wrong for
+    # headdim=64, seqlen=(113, 255), bias_type='matrix'. In this case the for loop
+    # may have zero step, and pipelining with the bias matrix could screw it up.
+    # So we just exit early.
+    if begin_m >= seqlen_q:
+        dv_ptrs = DV + (offs_n[:, None] * stride_dvn + offs_d[None, :])
+        dk_ptrs = DK + (offs_n[:, None] * stride_dkn + offs_d[None, :])
+        _bwd_store_dx(
+            dk_ptrs,
+            dk,
+            offs_n,
+            offs_d,
+            seqlen_k,
+            headdim,
+            EVEN_M=EVEN_M,
+            EVEN_N=EVEN_N,
+            even_headdim=EVEN_HEADDIM,
+        )
+        _bwd_store_dx(
+            dv_ptrs,
+            dv,
+            offs_n,
+            offs_d,
+            seqlen_k,
+            headdim,
+            EVEN_M=EVEN_M,
+            EVEN_N=EVEN_N,
+            even_headdim=EVEN_HEADDIM,
+        )
+        return
+    # k and v stay in SRAM throughout
+    # [2022-10-30] TD: Same bug as the fwd. In the case of EVEN_N=True and EVEN_M=False,
+    # if we just call tl.load(k_ptrs), we get the wrong output!
+    if EVEN_N & EVEN_M:
+        if EVEN_HEADDIM:
+            k = tl.load(k_ptrs)
+            v = tl.load(v_ptrs)
+        else:
+            k = tl.load(k_ptrs, mask=offs_d[None, :] < headdim, other=0.0)
+            v = tl.load(v_ptrs, mask=offs_d[None, :] < headdim, other=0.0)
+    else:
+        if EVEN_HEADDIM:
+            k = tl.load(k_ptrs, mask=offs_n[:, None] < seqlen_k, other=0.0)
+            v = tl.load(v_ptrs, mask=offs_n[:, None] < seqlen_k, other=0.0)
+        else:
+            k = tl.load(
+                k_ptrs, mask=(offs_n[:, None] < seqlen_k) & (offs_d[None, :] < headdim), other=0.0
+            )
+            v = tl.load(
+                v_ptrs, mask=(offs_n[:, None] < seqlen_k) & (offs_d[None, :] < headdim), other=0.0
+            )
+    # loop over rows
+    num_block_m = tl.cdiv(seqlen_q, BLOCK_M)
+    for start_m in range(begin_m, num_block_m * BLOCK_M, BLOCK_M):
+        start_m = tl.multiple_of(start_m, BLOCK_M)
+        offs_m_curr = start_m + offs_m
+        # load q, k, v, do on-chip
+        # Same bug as below. Otherwise gives wrong result for headdim=40, seqlen=(128, 117)
+        if EVEN_M & EVEN_HEADDIM:
+            q = tl.load(q_ptrs)
+        else:
+            if EVEN_HEADDIM:
+                q = tl.load(q_ptrs, mask=offs_m_curr[:, None] < seqlen_q, other=0.0)
+            else:
+                q = tl.load(
+                    q_ptrs,
+                    mask=(offs_m_curr[:, None] < seqlen_q) & (offs_d[None, :] < headdim),
+                    other=0.0,
+                )
+        # recompute p = softmax(qk, dim=-1).T
+        qk = tl.dot(q, k, trans_b=True)
+        # Trying to combine the two masks seem to make the result wrong
+        if not EVEN_N:  # Need to mask out otherwise the softmax is wrong
+            qk = tl.where(offs_n[None, :] < seqlen_k, qk, float("-inf"))
+        if IS_CAUSAL:
+            qk = tl.where(offs_m_curr[:, None] >= (offs_n[None, :]), qk, float("-inf"))
+        if BIAS_TYPE != "none":
+            tl.debug_barrier()  # Race condition otherwise
+            if BIAS_TYPE == "vector":
+                if EVEN_N:
+                    bias = tl.load(b_ptrs).to(tl.float32)
+                else:
+                    bias = tl.load(b_ptrs, mask=offs_n < seqlen_k, other=0.0).to(tl.float32)
+                bias = bias[None, :]
+            elif BIAS_TYPE == "matrix":
+                if EVEN_M & EVEN_N:
+                    bias = tl.load(b_ptrs).to(tl.float32)
+                else:
+                    bias = tl.load(
+                        b_ptrs,
+                        mask=(offs_m_curr[:, None] < seqlen_q) & (offs_n[None, :] < seqlen_k),
+                        other=0.0,
+                    ).to(tl.float32)
+            qk = qk * softmax_scale + bias
+        # There seems to be a race condition when headdim=48/96, and dq, dk, dv are wrong.
+        # Also wrong for headdim=64.
+        if not (EVEN_M & EVEN_HEADDIM):
+            tl.debug_barrier()
+        lse_i = tl.load(LSE + offs_m_curr)
+        if BIAS_TYPE == "none":
+            p = tl.exp(qk * softmax_scale - lse_i[:, None])
+        else:
+            p = tl.exp(qk - lse_i[:, None])
+        # compute dv
+        # [2022-10-30] TD: A Triton bug: if EVEN_M=True and EVEN_HEADDIM=False, if we call
+        # do = tl.load(do_ptrs, mask=offs_d[None, :] < headdim, other=0.0), we get wrong outputs
+        # in the case of headdim=48/96, seqlen_q & seqlen_k >= 512. If headdim=40 or seqlen < 512,
+        # the output is correct.
+        if EVEN_M & EVEN_HEADDIM:
+            do = tl.load(do_ptrs)
+        else:
+            # [2022-11-01] TD: Triton bug, there's a race condition if we just use m_mask and not d_mask.
+            do = tl.load(
+                do_ptrs,
+                mask=(offs_m_curr[:, None] < seqlen_q) & (offs_d[None, :] < headdim),
+                other=0.0,
+            )
+        # if EVEN_M:
+        #     if EVEN_HEADDIM:
+        #         do = tl.load(do_ptrs)
+        #     else:
+        #         do = tl.load(do_ptrs, mask=offs_d[None, :] < headdim, other=0.0)
+        # else:
+        #     if EVEN_HEADDIM:
+        #         do = tl.load(do_ptrs, mask=offs_m_curr[:, None] < seqlen_q, other=0.0)
+        #     else:
+        #         do = tl.load(do_ptrs, mask=(offs_m_curr[:, None] < seqlen_q)
+        #                                    & (offs_d[None, :] < headdim), other=0.0)
+        dv += tl.dot(p.to(do.dtype), do, trans_a=True)
+        # compute dp = dot(v, do)
+        # There seems to be a race condition when headdim=48/96, and dq, dk are wrong.
+        # Also wrong for headdim=128, seqlen=(108, 256), and ATOMIC_ADD=True
+        # Also wrong for headdim=64, seqlen=(1023, 1024), and ATOMIC_ADD=False
+        if not (EVEN_M & EVEN_HEADDIM):
+            tl.debug_barrier()
+        dp = tl.dot(do, v, trans_b=True)
+        # There's a race condition for headdim=48
+        if not EVEN_HEADDIM:
+            tl.debug_barrier()
+        # compute ds = p * (dp - delta[:, None])
+        # Putting the subtraction after the dp matmul (instead of before) is slightly faster
+        Di = tl.load(D + offs_m_curr)
+        # Converting ds to q.dtype here reduces register pressure and makes it much faster
+        # for BLOCK_HEADDIM=128
+        ds = (p * (dp - Di[:, None]) * softmax_scale).to(q.dtype)
+        # compute dk = dot(ds.T, q)
+        dk += tl.dot(ds, q, trans_a=True)
+        # compute dq
+        if not (
+            EVEN_M & EVEN_HEADDIM
+        ):  # Otherewise there's a race condition when BIAS_TYPE='matrix'
+            tl.debug_barrier()
+        if not ATOMIC_ADD:
+            if EVEN_M & EVEN_HEADDIM:  # Race condition if we just do EVEN_M
+                dq = tl.load(dq_ptrs, eviction_policy="evict_last")
+                dq += tl.dot(ds, k)
+                tl.store(dq_ptrs, dq, eviction_policy="evict_last")
+            else:
+                if EVEN_HEADDIM:
+                    dq = tl.load(
+                        dq_ptrs,
+                        mask=offs_m_curr[:, None] < seqlen_q,
+                        other=0.0,
+                        eviction_policy="evict_last",
+                    )
+                    dq += tl.dot(ds, k)
+                    tl.store(
+                        dq_ptrs,
+                        dq,
+                        mask=offs_m_curr[:, None] < seqlen_q,
+                        eviction_policy="evict_last",
+                    )
+                else:
+                    dq = tl.load(
+                        dq_ptrs,
+                        mask=(offs_m_curr[:, None] < seqlen_q) & (offs_d[None, :] < headdim),
+                        other=0.0,
+                        eviction_policy="evict_last",
+                    )
+                    dq += tl.dot(ds, k)
+                    tl.store(
+                        dq_ptrs,
+                        dq,
+                        mask=(offs_m_curr[:, None] < seqlen_q) & (offs_d[None, :] < headdim),
+                        eviction_policy="evict_last",
+                    )
+        else:  # If we're parallelizing across the seqlen_k dimension
+            dq = tl.dot(ds, k)
+            if EVEN_M & EVEN_HEADDIM:  # Race condition if we just do EVEN_M
+                tl.atomic_add(dq_ptrs, dq)
+            else:
+                if EVEN_HEADDIM:
+                    tl.atomic_add(dq_ptrs, dq, mask=offs_m_curr[:, None] < seqlen_q)
+                else:
+                    tl.atomic_add(
+                        dq_ptrs,
+                        dq,
+                        mask=(offs_m_curr[:, None] < seqlen_q) & (offs_d[None, :] < headdim),
+                    )
+        # increment pointers
+        dq_ptrs += BLOCK_M * stride_dqm
+        q_ptrs += BLOCK_M * stride_qm
+        do_ptrs += BLOCK_M * stride_dom
+        if BIAS_TYPE == "matrix":
+            b_ptrs += BLOCK_M * stride_bm
+    # write-back
+    dv_ptrs = DV + (offs_n[:, None] * stride_dvn + offs_d[None, :])
+    dk_ptrs = DK + (offs_n[:, None] * stride_dkn + offs_d[None, :])
+    _bwd_store_dx(
+        dk_ptrs,
+        dk,
+        offs_n,
+        offs_d,
+        seqlen_k,
+        headdim,
+        EVEN_M=EVEN_M,
+        EVEN_N=EVEN_N,
+        even_headdim=EVEN_HEADDIM,
+    )
+    _bwd_store_dx(
+        dv_ptrs,
+        dv,
+        offs_n,
+        offs_d,
+        seqlen_k,
+        headdim,
+        EVEN_M=EVEN_M,
+        EVEN_N=EVEN_N,
+        even_headdim=EVEN_HEADDIM,
+    )
+
+
+def init_to_zero(name):
+    return lambda nargs: nargs[name].zero_()
+
+
+@triton.autotune(
+    configs=[
+        triton.Config(
+            {"BLOCK_M": 128, "BLOCK_N": 128, "SEQUENCE_PARALLEL": False},
+            num_warps=8,
+            num_stages=1,
+            pre_hook=init_to_zero("DQ"),
+        ),
+        triton.Config(
+            {"BLOCK_M": 128, "BLOCK_N": 128, "SEQUENCE_PARALLEL": True},
+            num_warps=8,
+            num_stages=1,
+            pre_hook=init_to_zero("DQ"),
+        ),
+        # Other configs seem to give wrong results when seqlen_q % 128 != 0, disabling them for now
+        # # Kernel is buggy (give wrong result) if we set BLOCK_m=128, BLOCK_n=64, num_warps=*4*
+        # triton.Config({"BLOCK_M": 128, "BLOCK_N": 64, "SEQUENCE_PARALLEL": False}, num_warps=8, num_stages=1, pre_hook=init_to_zero('DQ')),
+        # triton.Config({"BLOCK_M": 128, "BLOCK_N": 64, "SEQUENCE_PARALLEL": True}, num_warps=8, num_stages=1, pre_hook=init_to_zero('DQ')),
+        # triton.Config({"BLOCK_M": 64, "BLOCK_N": 64, "SEQUENCE_PARALLEL": False}, num_warps=4, num_stages=1, pre_hook=init_to_zero('DQ')),
+        # triton.Config({"BLOCK_M": 64, "BLOCK_N": 64, "SEQUENCE_PARALLEL": True}, num_warps=4, num_stages=1, pre_hook=init_to_zero('DQ')),
+    ],
+    key=["CACHE_KEY_SEQLEN_Q", "CACHE_KEY_SEQLEN_K", "BIAS_TYPE", "IS_CAUSAL", "BLOCK_HEADDIM"],
+)
+@triton.heuristics(
+    {
+        "EVEN_M": lambda args: args["seqlen_q"] % args["BLOCK_M"] == 0,
+        "EVEN_N": lambda args: args["seqlen_k"] % args["BLOCK_N"] == 0,
+        "EVEN_HEADDIM": lambda args: args["headdim"] == args["BLOCK_HEADDIM"],
+    }
+)
+@triton.jit
+def _bwd_kernel(
+    Q,
+    K,
+    V,
+    Bias,
+    DO,
+    DQ,
+    DK,
+    DV,
+    LSE,
+    D,
+    softmax_scale,
+    stride_qb,
+    stride_qh,
+    stride_qm,
+    stride_kb,
+    stride_kh,
+    stride_kn,
+    stride_vb,
+    stride_vh,
+    stride_vn,
+    stride_bb,
+    stride_bh,
+    stride_bm,
+    stride_dob,
+    stride_doh,
+    stride_dom,
+    stride_dqb,
+    stride_dqh,
+    stride_dqm,
+    stride_dkb,
+    stride_dkh,
+    stride_dkn,
+    stride_dvb,
+    stride_dvh,
+    stride_dvn,
+    nheads,
+    seqlen_q,
+    seqlen_k,
+    seqlen_q_rounded,
+    headdim,
+    CACHE_KEY_SEQLEN_Q,
+    CACHE_KEY_SEQLEN_K,
+    BIAS_TYPE: tl.constexpr,
+    IS_CAUSAL: tl.constexpr,
+    BLOCK_HEADDIM: tl.constexpr,
+    SEQUENCE_PARALLEL: tl.constexpr,
+    EVEN_M: tl.constexpr,
+    EVEN_N: tl.constexpr,
+    EVEN_HEADDIM: tl.constexpr,
+    BLOCK_M: tl.constexpr,
+    BLOCK_N: tl.constexpr,
+):
+    off_hb = tl.program_id(1)
+    off_b = off_hb // nheads
+    off_h = off_hb % nheads
+    # offset pointers for batch/head
+    Q += off_b * stride_qb + off_h * stride_qh
+    K += off_b * stride_kb + off_h * stride_kh
+    V += off_b * stride_vb + off_h * stride_vh
+    DO += off_b * stride_dob + off_h * stride_doh
+    DQ += off_b * stride_dqb + off_h * stride_dqh
+    DK += off_b * stride_dkb + off_h * stride_dkh
+    DV += off_b * stride_dvb + off_h * stride_dvh
+    if BIAS_TYPE != "none":
+        Bias += off_b * stride_bb + off_h * stride_bh
+    # pointer to row-wise quantities in value-like data
+    D += off_hb * seqlen_q_rounded
+    LSE += off_hb * seqlen_q_rounded
+    if not SEQUENCE_PARALLEL:
+        num_block_n = tl.cdiv(seqlen_k, BLOCK_N)
+        for start_n in range(0, num_block_n):
+            _bwd_kernel_one_col_block(
+                start_n,
+                Q,
+                K,
+                V,
+                Bias,
+                DO,
+                DQ,
+                DK,
+                DV,
+                LSE,
+                D,
+                softmax_scale,
+                stride_qm,
+                stride_kn,
+                stride_vn,
+                stride_bm,
+                stride_dom,
+                stride_dqm,
+                stride_dkn,
+                stride_dvn,
+                seqlen_q,
+                seqlen_k,
+                headdim,
+                ATOMIC_ADD=False,
+                BIAS_TYPE=BIAS_TYPE,
+                IS_CAUSAL=IS_CAUSAL,
+                BLOCK_HEADDIM=BLOCK_HEADDIM,
+                EVEN_M=EVEN_M,
+                EVEN_N=EVEN_N,
+                EVEN_HEADDIM=EVEN_HEADDIM,
+                BLOCK_M=BLOCK_M,
+                BLOCK_N=BLOCK_N,
+            )
+    else:
+        start_n = tl.program_id(0)
+        _bwd_kernel_one_col_block(
+            start_n,
+            Q,
+            K,
+            V,
+            Bias,
+            DO,
+            DQ,
+            DK,
+            DV,
+            LSE,
+            D,
+            softmax_scale,
+            stride_qm,
+            stride_kn,
+            stride_vn,
+            stride_bm,
+            stride_dom,
+            stride_dqm,
+            stride_dkn,
+            stride_dvn,
+            seqlen_q,
+            seqlen_k,
+            headdim,
+            ATOMIC_ADD=True,
+            BIAS_TYPE=BIAS_TYPE,
+            IS_CAUSAL=IS_CAUSAL,
+            BLOCK_HEADDIM=BLOCK_HEADDIM,
+            EVEN_M=EVEN_M,
+            EVEN_N=EVEN_N,
+            EVEN_HEADDIM=EVEN_HEADDIM,
+            BLOCK_M=BLOCK_M,
+            BLOCK_N=BLOCK_N,
+        )
+
+
+def _flash_attn_forward(q, k, v, bias=None, causal=False, softmax_scale=None):
+    # shape constraints
+    batch, seqlen_q, nheads, d = q.shape
+    _, seqlen_k, _, _ = k.shape
+    assert k.shape == (batch, seqlen_k, nheads, d)
+    assert v.shape == (batch, seqlen_k, nheads, d)
+    assert d <= 128, "FlashAttention only support head dimensions up to 128"
+    assert q.dtype == k.dtype == v.dtype, "All tensors must have the same type"
+    assert q.dtype in [torch.float16, torch.bfloat16], "Only support fp16 and bf16"
+    assert q.is_cuda and k.is_cuda and v.is_cuda
+    softmax_scale = softmax_scale or 1.0 / math.sqrt(d)
+
+    has_bias = bias is not None
+    bias_type = "none"
+    if has_bias:
+        assert bias.dtype in [q.dtype, torch.float]
+        assert bias.is_cuda
+        assert bias.dim() == 4
+        if bias.stride(-1) != 1:
+            bias = bias.contiguous()
+        if bias.shape[2:] == (1, seqlen_k):
+            bias_type = "vector"
+        elif bias.shape[2:] == (seqlen_q, seqlen_k):
+            bias_type = "matrix"
+        else:
+            raise RuntimeError(
+                "Last 2 dimensions of bias must be (1, seqlen_k)" " or (seqlen_q, seqlen_k)"
+            )
+        bias = bias.expand(batch, nheads, seqlen_q, seqlen_k)
+    bias_strides = (bias.stride(0), bias.stride(1), bias.stride(2)) if has_bias else (0, 0, 0)
+
+    seqlen_q_rounded = math.ceil(seqlen_q / 128) * 128
+    lse = torch.empty((batch, nheads, seqlen_q_rounded), device=q.device, dtype=torch.float32)
+    tmp = torch.empty((batch, nheads, seqlen_q_rounded), device=q.device, dtype=torch.float32)
+    o = torch.empty_like(q)
+
+    BLOCK_HEADDIM = max(triton.next_power_of_2(d), 16)
+    BLOCK = 128
+    num_warps = 4 if d <= 64 else 8
+    grid = lambda META: (triton.cdiv(seqlen_q, META["BLOCK_M"]), batch * nheads)
+    _fwd_kernel[grid](
+        q,
+        k,
+        v,
+        bias,
+        o,
+        lse,
+        tmp,
+        softmax_scale,
+        q.stride(0),
+        q.stride(2),
+        q.stride(1),
+        k.stride(0),
+        k.stride(2),
+        k.stride(1),
+        v.stride(0),
+        v.stride(2),
+        v.stride(1),
+        *bias_strides,
+        o.stride(0),
+        o.stride(2),
+        o.stride(1),
+        nheads,
+        seqlen_q,
+        seqlen_k,
+        seqlen_q_rounded,
+        d,
+        seqlen_q // 32,
+        seqlen_k // 32,  # key for triton cache (limit number of compilations)
+        # Can't use kwargs here because triton autotune expects key to be args, not kwargs
+        # IS_CAUSAL=causal, BLOCK_HEADDIM=d,
+        bias_type,
+        causal,
+        BLOCK_HEADDIM,
+        BLOCK_M=BLOCK,
+        BLOCK_N=BLOCK,
+        num_warps=num_warps,
+        num_stages=1,
+    )
+    return o, lse, softmax_scale  # softmax_scale could have been updated
+
+
+def _flash_attn_backward(
+    do, q, k, v, o, lse, dq, dk, dv, bias=None, causal=False, softmax_scale=None
+):
+    # Make sure that the last dimension is contiguous
+    if do.stride(-1) != 1:
+        do = do.contiguous()
+    batch, seqlen_q, nheads, d = q.shape
+    _, seqlen_k, _, _ = k.shape
+    # assert d in {16, 32, 64, 128}
+    assert d <= 128
+    seqlen_q_rounded = math.ceil(seqlen_q / 128) * 128
+    assert lse.shape == (batch, nheads, seqlen_q_rounded)
+    assert q.stride(-1) == k.stride(-1) == v.stride(-1) == o.stride(-1) == 1
+    assert dq.stride(-1) == dk.stride(-1) == dv.stride(-1) == 1
+    softmax_scale = softmax_scale or 1.0 / math.sqrt(d)
+    # dq_accum = torch.zeros_like(q, dtype=torch.float32)
+    dq_accum = torch.empty_like(q, dtype=torch.float32)
+    delta = torch.empty_like(lse)
+    # delta = torch.zeros_like(lse)
+
+    BLOCK_HEADDIM = max(triton.next_power_of_2(d), 16)
+    grid = lambda META: (triton.cdiv(seqlen_q, META["BLOCK_M"]), batch * nheads)
+    _bwd_preprocess_do_o_dot[grid](
+        o,
+        do,
+        delta,
+        o.stride(0),
+        o.stride(2),
+        o.stride(1),
+        do.stride(0),
+        do.stride(2),
+        do.stride(1),
+        nheads,
+        seqlen_q,
+        seqlen_q_rounded,
+        d,
+        BLOCK_M=128,
+        BLOCK_HEADDIM=BLOCK_HEADDIM,
+    )
+
+    has_bias = bias is not None
+    bias_type = "none"
+    if has_bias:
+        assert bias.dtype in [q.dtype, torch.float]
+        assert bias.is_cuda
+        assert bias.dim() == 4
+        assert bias.stride(-1) == 1
+        if bias.shape[2:] == (1, seqlen_k):
+            bias_type = "vector"
+        elif bias.shape[2:] == (seqlen_q, seqlen_k):
+            bias_type = "matrix"
+        else:
+            raise RuntimeError(
+                "Last 2 dimensions of bias must be (1, seqlen_k)" " or (seqlen_q, seqlen_k)"
+            )
+        bias = bias.expand(batch, nheads, seqlen_q, seqlen_k)
+    bias_strides = (bias.stride(0), bias.stride(1), bias.stride(2)) if has_bias else (0, 0, 0)
+
+    # BLOCK_M = 128
+    # BLOCK_N = 64
+    # num_warps = 4
+    grid = lambda META: (
+        triton.cdiv(seqlen_k, META["BLOCK_N"]) if META["SEQUENCE_PARALLEL"] else 1,
+        batch * nheads,
+    )
+    _bwd_kernel[grid](
+        q,
+        k,
+        v,
+        bias,
+        do,
+        dq_accum,
+        dk,
+        dv,
+        lse,
+        delta,
+        softmax_scale,
+        q.stride(0),
+        q.stride(2),
+        q.stride(1),
+        k.stride(0),
+        k.stride(2),
+        k.stride(1),
+        v.stride(0),
+        v.stride(2),
+        v.stride(1),
+        *bias_strides,
+        do.stride(0),
+        do.stride(2),
+        do.stride(1),
+        dq_accum.stride(0),
+        dq_accum.stride(2),
+        dq_accum.stride(1),
+        dk.stride(0),
+        dk.stride(2),
+        dk.stride(1),
+        dv.stride(0),
+        dv.stride(2),
+        dv.stride(1),
+        nheads,
+        seqlen_q,
+        seqlen_k,
+        seqlen_q_rounded,
+        d,
+        seqlen_q // 32,
+        seqlen_k // 32,  # key for triton cache (limit number of compilations)
+        # Can't use kwargs here because triton autotune expects key to be args, not kwargs
+        # IS_CAUSAL=causal, BLOCK_HEADDIM=d,
+        bias_type,
+        causal,
+        BLOCK_HEADDIM,
+        # SEQUENCE_PARALLEL=False,
+        # BLOCK_M=BLOCK_M, BLOCK_N=BLOCK_N,
+        # num_warps=num_warps,
+        # num_stages=1,
+    )
+    dq.copy_(dq_accum)
+
+
+# class FlashAttnQKVPackedFunc(torch.autograd.Function):
+#     @staticmethod
+#     def forward(ctx, qkv, bias=None, causal=False, softmax_scale=None):
+#         """
+#         qkv: (batch, seqlen, 3, nheads, headdim)
+#         bias: optional, shape broadcastible to (batch, nheads, seqlen, seqlen).
+#             For example, ALiBi mask for causal would have shape (1, nheads, 1, seqlen).
+#             ALiBi mask for non-causal would have shape (1, nheads, seqlen, seqlen)
+#         """
+#         # Make sure that the last dimension is contiguous
+#         if qkv.stride(-1) != 1:
+#             qkv = qkv.contiguous()
+#         o, lse, ctx.softmax_scale = _flash_attn_forward(
+#             qkv[:, :, 0],
+#             qkv[:, :, 1],
+#             qkv[:, :, 2],
+#             bias=bias,
+#             causal=causal,
+#             softmax_scale=softmax_scale,
+#         )
+#         ctx.save_for_backward(qkv, o, lse, bias)
+#         ctx.causal = causal
+#         return o
+
+#     @staticmethod
+#     def backward(ctx, do):
+#         qkv, o, lse, bias = ctx.saved_tensors
+#         assert not ctx.needs_input_grad[1], "FlashAttention does not support bias gradient yet"
+#         # Triton's autotune causes the Tensor._version to change, and so Pytorch autograd
+#         # does a memcpy. To avoid this we run in inference_mode, which doesn't track the version.
+#         with torch.inference_mode():
+#             dqkv = torch.empty_like(qkv)
+#             _flash_attn_backward(
+#                 do,
+#                 qkv[:, :, 0],
+#                 qkv[:, :, 1],
+#                 qkv[:, :, 2],
+#                 o,
+#                 lse,
+#                 dqkv[:, :, 0],
+#                 dqkv[:, :, 1],
+#                 dqkv[:, :, 2],
+#                 bias=bias,
+#                 causal=ctx.causal,
+#                 softmax_scale=ctx.softmax_scale,
+#             )
+#         return dqkv, None, None, None
+
+
+# flash_attn_qkvpacked_func = FlashAttnQKVPackedFunc.apply
+
+
+# class FlashAttnKVPackedFunc(torch.autograd.Function):
+#     @staticmethod
+#     def forward(ctx, q, kv, bias=None, causal=False, softmax_scale=None):
+#         """
+#         q: (batch, seqlen_q, nheads, headdim)
+#         kv: (batch, seqlen_k, 2, nheads, headdim)
+#         bias: optional, shape broadcastible to (batch, nheads, seqlen_q, seqlen_k).
+#             For example, ALiBi mask for causal would have shape (1, nheads, 1, seqlen_k).
+#             ALiBi mask for non-causal would have shape (1, nheads, seqlen_q, seqlen_k)
+#         """
+#         # Make sure that the last dimension is contiguous
+#         q, kv = [x if x.stride(-1) == 1 else x.contiguous() for x in [q, kv]]
+#         o, lse, ctx.softmax_scale = _flash_attn_forward(
+#             q, kv[:, :, 0], kv[:, :, 1], bias=bias, causal=causal, softmax_scale=softmax_scale
+#         )
+#         ctx.save_for_backward(q, kv, o, lse, bias)
+#         ctx.causal = causal
+#         return o
+
+#     @staticmethod
+#     def backward(ctx, do):
+#         q, kv, o, lse, bias = ctx.saved_tensors
+#         if len(ctx.needs_input_grad) >= 3:
+#             assert not ctx.needs_input_grad[2], "FlashAttention does not support bias gradient yet"
+#         # Triton's autotune causes the Tensor._version to change, and so Pytorch autograd
+#         # does a memcpy. To avoid this we run in inference_mode, which doesn't track the version.
+#         with torch.inference_mode():
+#             dq = torch.empty_like(q)
+#             dkv = torch.empty_like(kv)
+#             _flash_attn_backward(
+#                 do,
+#                 q,
+#                 kv[:, :, 0],
+#                 kv[:, :, 1],
+#                 o,
+#                 lse,
+#                 dq,
+#                 dkv[:, :, 0],
+#                 dkv[:, :, 1],
+#                 bias=bias,
+#                 causal=ctx.causal,
+#                 softmax_scale=ctx.softmax_scale,
+#             )
+#         return dq, dkv, None, None, None
+
+
+# flash_attn_kvpacked_func = FlashAttnKVPackedFunc.apply
+
+
+class FlashAttnFunc(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, q, k, v, bias=None, causal=False, softmax_scale=None):
+        """
+        q: (batch_size, seqlen_q, nheads, headdim)
+        k, v: (batch_size, seqlen_k, nheads, headdim)
+        bias: optional, shape broadcastible to (batch, nheads, seqlen_q, seqlen_k).
+            For example, ALiBi mask for causal would have shape (1, nheads, 1, seqlen_k).
+            ALiBi mask for non-causal would have shape (1, nheads, seqlen_q, seqlen_k)
+        """
+        # Make sure that the last dimension is contiguous
+        q, k, v = [x if x.stride(-1) == 1 else x.contiguous() for x in [q, k, v]]
+        o, lse, ctx.softmax_scale = _flash_attn_forward(
+            q, k, v, bias=bias, causal=causal, softmax_scale=softmax_scale
+        )
+        ctx.save_for_backward(q, k, v, o, lse, bias)
+        ctx.causal = causal
+        return o, lse
+
+    @staticmethod
+    def backward(ctx, do, dlse_use_needed=None):
+        q, k, v, o, lse, bias = ctx.saved_tensors
+        # assert not ctx.needs_input_grad[3], "FlashAttention does not support bias gradient yet"
+        # Triton's autotune causes the Tensor._version to change, and so Pytorch autograd
+        # does a memcpy. To avoid this we run in inference_mode, which doesn't track the version.
+        # with torch.inference_mode():
+        dq = torch.empty_like(q)
+        dk = torch.empty_like(k)
+        dv = torch.empty_like(v)
+        _flash_attn_backward(
+            do,
+            q,
+            k,
+            v,
+            o,
+            lse,
+            dq,
+            dk,
+            dv,
+            bias=bias,
+            causal=ctx.causal,
+            softmax_scale=ctx.softmax_scale,
+        )
+        return dq, dk, dv, None, None, None
+
+
+flash_attn_func = FlashAttnFunc.apply
+
+
+File Path: models/attention/hyper_attn.py
+Content:
+import math
+import torch
+from einops import rearrange
+
+from .utils import exact_attention, exact_attention_cuda, add_self_attentions, indexing
+from .angular_lsh import AngularLSH
+
+
+class HyperAttention(torch.nn.Module):
+
+    def __init__(self, input_dim=64, lsh_num_projs=7, block_size=256, sample_size=256, min_seq_len=4096, cuda=False):
+        super().__init__()
+        self.input_dim = input_dim
+        self.lsh_num_projs = lsh_num_projs
+        self.block_size = block_size
+        self.sample_size = sample_size
+        self.min_seq_len = min_seq_len
+        self.cuda = cuda
+        self.lsh = AngularLSH(num_projs=self.lsh_num_projs, dim=(1, 1, input_dim))
+
+        
+    def forward(self, query: torch.tensor, key: torch.tensor, value: torch.tensor, scale=None, causal=False, return_lse=False):
+        query = query.contiguous()
+        key = key.contiguous()
+        value = value.contiguous()
+
+        n_query = query.shape[2]
+        batch_size, n_heads, n_key, dim = key.shape
+        scale = dim ** (-0.5) if scale is None else scale
+        
+        # Without causal masking
+        if not causal: 
+            attn, lse = self.forward_no_causal_mask(query, key, value, scale)
+
+        # With causal masking
+        else:
+            if n_key <= self.min_seq_len:
+                if self.cuda:
+                    attn, lse = exact_attention_cuda(query, key, value, scale, causal=True)
+                else:
+                    attn, lse = exact_attention(query, key, value, scale, causal=True)
+            else:
+            
+                # If n_query is odd we pad inputs by adding all-zero rows
+                if n_query % 2:
+                    query = torch.nn.functional.pad(query, (0,0,0,1), mode='constant',value=0.)
+                    key = torch.nn.functional.pad(key, (0,0,0,1), mode='constant',value=0.)
+                    value = torch.nn.functional.pad(value, (0,0,0,1), mode='constant',value=0.)
+
+                q_bd = query.view(batch_size, 2*n_heads, query.shape[2]//2, query.shape[-1])
+                k_bd = key.view(batch_size, 2*n_heads, key.shape[2]//2, key.shape[-1])
+                v_bd = value.view(batch_size, 2*n_heads, key.shape[2]//2, value.shape[-1])
+        
+                attn_bd, lse_bd = self.forward(q_bd, k_bd, v_bd, scale, True, True)
+                
+                if attn_bd.shape[2] not in attn_bd.stride():
+                    attn_bd = attn_bd.contiguous()
+                attn_bd = attn_bd.view(batch_size, n_heads, -1, dim)
+
+                if lse_bd.shape[2] not in lse_bd.stride():
+                    lse_bd = lse_bd.contiguous()
+                lse_bd = lse_bd.view(batch_size, n_heads, -1, 1)
+
+                attn_unmasked, lse_unmasked = self.forward_no_causal_mask(
+                    query[:, :, key.shape[2]//2:, :],
+                    key[:, :, :key.shape[2]//2, :], 
+                    value[:, :, :key.shape[2]//2, :], scale)
+
+                attn_up, lse_up = attn_bd[:,:,:query.shape[2]//2,:], lse_bd[:,:,:query.shape[2]//2,:]
+                attn_down, lse_down = add_self_attentions(
+                    attn_bd[:,:,query.shape[2]//2:,:],
+                    lse_bd[:,:,query.shape[2]//2:,:],
+                    attn_unmasked,
+                    lse_unmasked)
+
+                attn = torch.cat((attn_up, attn_down), dim=-2)
+                lse = torch.cat((lse_up, lse_down), dim=-2)
+
+                # If n_query was odd exclude the last rows
+                if n_query % 2:
+                    attn = attn[:,:,:-1,:]
+                    lse = lse[:,:,:-1,:]
+
+        if not return_lse:
+            return attn
+        else:
+            return attn, lse
+
+
+    def forward_no_causal_mask(self, query, key, value, scale):
+
+        batch_size, head_size, n_query, dim = query.shape
+        n_key = key.shape[2]
+
+        if self.min_seq_len > n_query:
+            if self.cuda:
+                return exact_attention_cuda(query, key, value, scale, causal=False)
+            else:
+                return exact_attention(query, key, value, scale, causal=False)
+
+        # 1. Sorted block-diagonal via sortLSH
+        _, query_sort_idx = torch.sort(self.lsh.hash(query), dim=2, stable=True) # batch_size x head_size x n
+        _, key_sort_idx = torch.sort(self.lsh.hash(key), dim=2, stable=True)
+        query_sort_idx_inv = torch.argsort(query_sort_idx, dim=2, stable=True) # for recovering the row order
+
+        key_block_size = self.block_size
+
+        query_sorted = indexing(query, query_sort_idx, key_block_size)
+        key_sorted = indexing(key, key_sort_idx, key_block_size)
+        value_sorted = indexing(value, key_sort_idx, key_block_size)
+
+        if key_block_size > 0:
+
+            num_blocks = key_sorted.shape[2] // key_block_size
+            query_block_size = query_sorted.shape[2] // num_blocks
+
+            # Reshape tensors to [batch_size*head_size, 1, block_size, dim] as Flash-attn only allows 4d-tensors
+            query_split_per_block = query_sorted.view(-1, 1, query_block_size, dim)
+            key_split_per_block = key_sorted.view(-1, 1, key_block_size, dim)
+            value_split_per_block = value_sorted.view(-1, 1, key_block_size, dim)
+
+            if self.cuda:
+                attn_block, lse_block = exact_attention_cuda(
+                    query_split_per_block, key_split_per_block, value_split_per_block,
+                    softmax_scale=scale, causal=False)
+            else:
+                attn_block, lse_block = exact_attention(
+                    query_split_per_block, key_split_per_block, value_split_per_block,
+                    softmax_scale=scale, causal=False)
+
+            if attn_block.shape[2] not in attn_block.stride():
+                attn_block = attn_block.contiguous()
+            attn_block = attn_block.view(batch_size, head_size, query_sorted.shape[2], -1)
+
+            if lse_block.shape[2] not in lse_block.stride():
+                lse_block = lse_block.contiguous()
+            lse_block = lse_block.view(batch_size, head_size, query_sorted.shape[2], -1)
+
+            # When inputs are padded, then unpad them
+            if query_sorted.shape[2] != n_query: #query.shape[2]:
+                attn_block, lse_block = attn_block[:,:,:n_query,:], lse_block[:,:,:n_query,:]
+                query_sorted = query_sorted[:,:,:n_query,:]
+                key_sorted = key_sorted[:,:,:n_key,:]
+                value_sorted = value_sorted[:,:,:n_key,:]
+
+        else:
+            query_block_size = -1
+            query_block_size = -1
+            attn_block, lse_block = 0, 0
+
+        # 2. Residual low-rank part via uniform sampling
+        # Sample indices uniformly at random
+        sample_size = self.sample_size
+        if sample_size > 0 and (n_query > query_block_size) and (n_key > key_block_size):
+            sampled_set = torch.randint(n_key, size=(batch_size, head_size, sample_size), device=query_sorted.device)
+            
+            # Compute mask for hiding A_ij computed in block-diagonal attention
+            offset_n = rearrange(torch.arange(n_query, device=query_sorted.device), 'n -> 1 n 1')
+            weights = n_key / sample_size
+            value_subset = indexing(value_sorted, sampled_set)
+            key_subset = indexing(key_sorted, sampled_set)
+
+            if not self.cuda:
+                block_mask = (offset_n // query_block_size) == (sampled_set // key_block_size).view(-1, 1, sample_size)
+                block_mask = block_mask.view(batch_size, head_size, -1, sample_size)
+                block_mask = block_mask.to(query_sorted.dtype)
+                block_mask *= torch.finfo(query_sorted.dtype).min # adding -inf added to QK^T
+
+                attn_res, lse_res = exact_attention(query_sorted, key_subset, value_subset, scale, causal=False, bias=block_mask)
+            else:
+                attn_res, lse_res = exact_attention_cuda(query_sorted, key_subset, value_subset, scale, causal=False)
+            lse_res = lse_res + math.log(weights)
+
+            # Add two attentions
+            if key_block_size > 0:
+                attn, lse = add_self_attentions(attn_block, lse_block, attn_res, lse_res)
+            else:
+                attn, lse = attn_res, lse_res
+        else:
+            attn, lse = attn_block, lse_block
+
+        # Re-order rows with the inverse order for query_sorted -> query
+        attn = indexing(attn, query_sort_idx_inv)
+        lse = indexing(lse, query_sort_idx_inv)
+        return attn, lse
+
+File Path: models/attention/modeling_chatglm_fast_attention.py
+Content:
+import math
+import torch
+
+from .hyper_attn import HyperAttention
+
+# Edited from https://huggingface.co/THUDM/chatglm2-6b-32k/blob/main/modeling_chatglm.py#L194
+class FastCoreAttention(torch.nn.Module):
+    
+    def __init__(self, config, layer_number, **kwargs):
+        super(FastCoreAttention, self).__init__()
+
+        self.apply_query_key_layer_scaling = config.apply_query_key_layer_scaling
+        self.attention_softmax_in_fp32 = config.attention_softmax_in_fp32
+        if self.apply_query_key_layer_scaling:
+            self.attention_softmax_in_fp32 = True
+        self.layer_number = max(1, layer_number)
+
+        projection_size = config.kv_channels * config.num_attention_heads
+
+        # Per attention head and per partition values.
+        self.hidden_size_per_partition = projection_size
+        self.hidden_size_per_attention_head = projection_size // config.num_attention_heads
+        self.num_attention_heads_per_partition = config.num_attention_heads
+
+        coeff = None
+        self.norm_factor = math.sqrt(self.hidden_size_per_attention_head)
+        if self.apply_query_key_layer_scaling:
+            coeff = self.layer_number
+            self.norm_factor *= coeff
+        self.coeff = coeff
+
+        self.attention_dropout = torch.nn.Dropout(config.attention_dropout)
+        
+        self.attn_method = kwargs.get('attn_method')
+        if self.attn_method in ['hyper', 'hyper-cuda']:
+            lsh_num_projs = kwargs.get('lsh_num_projs')
+            block_size = kwargs.get('block_size')
+            sample_size = kwargs.get('sample_size')
+            min_seq_len = kwargs.get('min_seq_len')
+            self.attn = HyperAttention(
+                input_dim=128,
+                lsh_num_projs=lsh_num_projs, 
+                block_size=block_size,
+                sample_size=sample_size, 
+                min_seq_len=min_seq_len,
+                cuda='cuda' in self.attn_method)
+        else: 
+            raise NotImplementedError("Invalid attn_method option")
+        
+
+    def forward(self,  query_layer, key_layer, value_layer, attention_mask):
+
+        query_layer, key_layer, value_layer = [k.permute(1, 2, 0, 3) for k in [query_layer, key_layer, value_layer]]
+        if attention_mask is None and query_layer.shape[2] == key_layer.shape[2]:
+            softmax_scale = query_layer.shape[-1]**(-0.5)
+            context_layer = self.attn(query_layer, key_layer, value_layer, causal=True)
+
+        else:
+            assert False, 'this part the query length and key length may be different and not be a computational bottleneck.'
+            if attention_mask is not None:
+                attention_mask = ~attention_mask
+            context_layer = torch.nn.functional.scaled_dot_product_attention(query_layer, key_layer, value_layer, attention_mask)
+
+        context_layer = context_layer.permute(2, 0, 1, 3)
+        new_context_layer_shape = context_layer.size()[:-2] + (self.hidden_size_per_partition,)
+        context_layer = context_layer.reshape(*new_context_layer_shape)
+        return context_layer
+
+File Path: models/attention/utils.py
+Content:
+import math
+import torch
+try:
+    from flash_attn import flash_attn_func as flash_attn_func_cuda
+except ImportError:
+    flash_attn_func_cuda = None
+
+from .flash_attn_triton_for_hyper import flash_attn_func
+
+
+def indexing(x, indices, chunk_size=-1):
+    """ 
+    inputs:
+        - x: 4d-tensor with shape [b, h, n, d] 
+        - indices: 3d-tensor with shape [b, h, s] where each entry should be in [0, n-1]
+    output:
+        - out: 4d-tensor with shape [b, h, s, d] where out[i,j] = x[i,j][indices[i,j],:]
+    
+    A naive implementation:
+        out = torch.zeros(b, h, s, d)
+        for i in range(b):
+            for j in range(h):
+                out[i,j] = x[i,j][idx[i,j],:]
+        return out
+    """
+    if chunk_size < 0 or (chunk_size > 0 and x.shape[-2] % chunk_size == 0):
+        return x.gather(2, indices.unsqueeze(-1).expand(-1, -1, -1, x.shape[-1]))
+    else:
+        x = x.gather(2, indices.unsqueeze(-1).expand(-1, -1, -1, x.shape[-1]))
+        new_n = math.ceil(x.shape[2] / chunk_size) * chunk_size
+        if new_n <= 0 or new_n - x.shape[2] <= 0:
+            import pdb; pdb.set_trace();
+        return torch.nn.functional.pad(x, (0,0,0,new_n-x.shape[2]), mode='constant',value=0.)
+
+
+def add_self_attentions(attn1, lse1, attn2, lse2):
+    """
+    inputs:
+        - attn1, attn2: 4d-tensors with shape [b, h, n, d]
+        - lse1, lse2: 4d-tensors of log-sum-exp with shape [b, h, n, 1]
+    output:
+        - attn
+        = (attn1 * exp(lse1) + attn2 * exp(lse2)) / (exp(lse1) + exp(lse2))
+        = (attn1 + attn2 * exp(lse2 - lse1)) / (1 + exp(lse2-lse1))
+        = attn1 * c + attn2 * (1-c), where c=1/(1 + exp(lse2-lse1)),
+        - lse 
+        = log(exp(lse1) + exp(lse2)) 
+        = log(exp(lse1) * (1 + exp(lse2 - lse1))) 
+        = lse1 + log(1 + exp(lse2 - lse1)) = lse1 - log(c)
+    """
+    c = (1 / (1 + (lse2 - lse1).exp())).to(dtype=attn1.dtype)
+    attn = c * attn1 + (1-c) * attn2
+    lse = lse1 - (c + torch.finfo(lse1.dtype).eps).log()
+    return attn, lse
+
+
+def exact_attention(query, key, value, softmax_scale, causal=False, bias=None):
+    if query.dtype not in [torch.bfloat16, torch.float16]:
+        qk = query @ key.transpose(-1,-2) * softmax_scale
+        if causal:
+            qk += (torch.ones(query.shape[2], key.shape[2], device=query.device) * torch.finfo(query.dtype).min).triu(1).reshape(1,1,query.shape[2], key.shape[2])
+        out = qk.softmax(dim=-1) @ value
+        lse = torch.logsumexp(qk, dim=-1, keepdim=True)
+        return out, lse
+
+    out, lse = flash_attn_func(
+        query.transpose(1,2), key.transpose(1,2), value.transpose(1,2),
+        bias, causal, softmax_scale)
+    out = out.transpose(1,2)
+    
+    lse = lse.detach()
+    if lse.shape[2] != out.shape[2]:
+        lse = lse[:,:,:out.shape[2]]
+    lse = lse.unsqueeze(-1)
+    return out, lse
+    
+
+def exact_attention_cuda(query, key, value, softmax_scale, causal, bias=None):
+    if flash_attn_func_cuda is None:
+        raise ImportError("Please install flash_attn (pip install flash-attn --no-build-isolation)")
+    out, lse, _ = flash_attn_func_cuda(
+        query.transpose(1,2), key.transpose(1,2), value.transpose(1,2),
+        softmax_scale=softmax_scale, causal=causal, return_attn_probs=True)
+    out = out.transpose(1,2)
+    lse = lse.unsqueeze(-1)
+    return out, lse
+
+File Path: models/replace_llm_attention.py
+Content:
+NUM_TOTAL_LAYERS = {
+    'chatglm2-6b-32k': 28,
+}
+
+def patch_attention_layers(model, model_name, patch_config, num_patch_layers, **kwargs):
+
+    num_total_layers = NUM_TOTAL_LAYERS[model_name]
+    num_patch_layers = num_total_layers if num_patch_layers < 0 else num_patch_layers
+    
+    if patch_config == 'last':
+        patch_layer_indices = range(num_total_layers-1, num_total_layers-num_patch_layers-1, -1)
+
+    elif patch_config == 'first':
+        patch_layer_indices = range(num_patch_layers)
+        
+    elif patch_config == 'odd':
+        patch_layer_indices = range(1, num_total_layers, 2)
+
+    elif patch_config == 'even':
+        patch_layer_indices = range(0, num_total_layers, 2)
+
+    elif patch_config == 'odd_first':
+        patch_layer_indices = range(1, 2*num_patch_layers, 2)
+
+    elif patch_config == 'odd_last':
+        patch_layer_indices = range(num_total_layers-1, num_total_layers-num_patch_layers, -1)
+
+    elif patch_config == 'even_first':
+        patch_layer_indices = range(0, num_total_layers, 2)[:num_patch_layers]
+
+    elif patch_config == 'even_last':
+        patch_layer_indices = range(1, num_total_layers, 2)[-num_patch_layers:]
+
+    else:
+        raise NotImplementedError(f"Invalid patch_config option: {patch_config}")
+
+    if model_name == 'chatglm2-6b-32k':
+        from models.attention.modeling_chatglm_fast_attention import FastCoreAttention
+    
+        print(f"patch_config: {patch_config}, attn_method: {kwargs['attn_method']}, num_patch_layers: {num_patch_layers}, patch_indices: {list(patch_layer_indices)}")
+        for i in patch_layer_indices:
+            model.transformer.encoder.layers[i].self_attention.core_attention = FastCoreAttention(model.config, i, **kwargs)
+    
+
+Output:
+{
+    "experimental_code": "import math\nimport torch\nfrom einops import rearrange\n\nfrom .utils import exact_attention, exact_attention_cuda, add_self_attentions, indexing\nfrom .angular_lsh import AngularLSH\n\n\nclass HyperAttention(torch.nn.Module):\n\n    def __init__(self, input_dim=64, lsh_num_projs=7, block_size=256, sample_size=256, min_seq_len=4096, cuda=False):\n        super().__init__()\n        self.input_dim = input_dim\n        self.lsh_num_projs = lsh_num_projs\n        self.block_size = block_size\n        self.sample_size = sample_size\n        self.min_seq_len = min_seq_len\n        self.cuda = cuda\n        self.lsh = AngularLSH(num_projs=self.lsh_num_projs, dim=(1, 1, input_dim))\n\n        \n    def forward(self, query: torch.tensor, key: torch.tensor, value: torch.tensor, scale=None, causal=False, return_lse=False):\n        query = query.contiguous()\n        key = key.contiguous()\n        value = value.contiguous()\n\n        n_query = query.shape[2]\n        batch_size, n_heads, n_key, dim = key.shape\n        scale = dim ** (-0.5) if scale is None else scale\n        \n        # Without causal masking\n        if not causal: \n            attn, lse = self.forward_no_causal_mask(query, key, value, scale)\n\n        # With causal masking\n        else:\n            if n_key <= self.min_seq_len:\n                if self.cuda:\n                    attn, lse = exact_attention_cuda(query, key, value, scale, causal=True)\n                else:\n                    attn, lse = exact_attention(query, key, value, scale, causal=True)\n            else:\n            \n                # If n_query is odd we pad inputs by adding all-zero rows\n                if n_query % 2:\n                    query = torch.nn.functional.pad(query, (0,0,0,1), mode='constant',value=0.)\n                    key = torch.nn.functional.pad(key, (0,0,0,1), mode='constant',value=0.)\n                    value = torch.nn.functional.pad(value, (0,0,0,1), mode='constant',value=0.)\n\n                q_bd = query.view(batch_size, 2*n_heads, query.shape[2]//2, query.shape[-1])\n                k_bd = key.view(batch_size, 2*n_heads, key.shape[2]//2, key.shape[-1])\n                v_bd = value.view(batch_size, 2*n_heads, key.shape[2]//2, value.shape[-1])\n        \n                attn_bd, lse_bd = self.forward(q_bd, k_bd, v_bd, scale, True, True)\n                \n                if attn_bd.shape[2] not in attn_bd.stride():\n                    attn_bd = attn_bd.contiguous()\n                attn_bd = attn_bd.view(batch_size, n_heads, -1, dim)\n\n                if lse_bd.shape[2] not in lse_bd.stride():\n                    lse_bd = lse_bd.contiguous()\n                lse_bd = lse_bd.view(batch_size, n_heads, -1, 1)\n\n                attn_unmasked, lse_unmasked = self.forward_no_causal_mask(\n                    query[:, :, key.shape[2]//2:, :],\n                    key[:, :, :key.shape[2]//2, :], \n                    value[:, :, :key.shape[2]//2, :], scale)\n\n                attn_up, lse_up = attn_bd[:,:,:query.shape[2]//2,:], lse_bd[:,:,:query.shape[2]//2,:]\n                attn_down, lse_down = add_self_attentions(\n                    attn_bd[:,:,query.shape[2]//2:,:],\n                    lse_bd[:,:,query.shape[2]//2:,:],\n                    attn_unmasked,\n                    lse_unmasked)\n\n                attn = torch.cat((attn_up, attn_down), dim=-2)\n                lse = torch.cat((lse_up, lse_down), dim=-2)\n\n                # If n_query was odd exclude the last rows\n                if n_query % 2:\n                    attn = attn[:,:,:-1,:]\n                    lse = lse[:,:,:-1,:]\n\n        if not return_lse:\n            return attn\n        else:\n            return attn, lse\n\n\n    def forward_no_causal_mask(self, query, key, value, scale):\n\n        batch_size, head_size, n_query, dim = query.shape\n        n_key = key.shape[2]\n\n        if self.min_seq_len > n_query:\n            if self.cuda:\n                return exact_attention_cuda(query, key, value, scale, causal=False)\n            else:\n                return exact_attention(query, key, value, scale, causal=False)\n\n        # 1. Sorted block-diagonal via sortLSH\n        _, query_sort_idx = torch.sort(self.lsh.hash(query), dim=2, stable=True) # batch_size x head_size x n\n        _, key_sort_idx = torch.sort(self.lsh.hash(key), dim=2, stable=True)\n        query_sort_idx_inv = torch.argsort(query_sort_idx, dim=2, stable=True) # for recovering the row order\n\n        key_block_size = self.block_size\n\n        query_sorted = indexing(query, query_sort_idx, key_block_size)\n        key_sorted = indexing(key, key_sort_idx, key_block_size)\n        value_sorted = indexing(value, key_sort_idx, key_block_size)\n\n        if key_block_size > 0:\n\n            num_blocks = key_sorted.shape[2] // key_block_size\n            query_block_size = query_sorted.shape[2] // num_blocks\n\n            # Reshape tensors to [batch_size*head_size, 1, block_size, dim] as Flash-attn only allows 4d-tensors\n            query_split_per_block = query_sorted.view(-1, 1, query_block_size, dim)\n            key_split_per_block = key_sorted.view(-1, 1, key_block_size, dim)\n            value_split_per_block = value_sorted.view(-1, 1, key_block_size, dim)\n\n            if self.cuda:\n                attn_block, lse_block = exact_attention_cuda(\n                    query_split_per_block, key_split_per_block, value_split_per_block,\n                    softmax_scale=scale, causal=False)\n            else:\n                attn_block, lse_block = exact_attention(\n                    query_split_per_block, key_split_per_block, value_split_per_block,\n                    softmax_scale=scale, causal=False)\n\n            if attn_block.shape[2] not in attn_block.stride():\n                attn_block = attn_block.contiguous()\n            attn_block = attn_block.view(batch_size, head_size, query_sorted.shape[2], -1)\n\n            if lse_block.shape[2] not in lse_block.stride():\n                lse_block = lse_block.contiguous()\n            lse_block = lse_block.view(batch_size, head_size, query_sorted.shape[2], -1)\n\n            # When inputs are padded, then unpad them\n            if query_sorted.shape[2] != n_query: #query.shape[2]:\n                attn_block, lse_block = attn_block[:,:,:n_query,:], lse_block[:,:,:n_query,:]\n                query_sorted = query_sorted[:,:,:n_query,:]\n                key_sorted = key_sorted[:,:,:n_key,:]\n                value_sorted = value_sorted[:,:,:n_key,:]\n\n        else:\n            query_block_size = -1\n            query_block_size = -1\n            attn_block, lse_block = 0, 0\n\n        # 2. Residual low-rank part via uniform sampling\n        # Sample indices uniformly at random\n        sample_size = self.sample_size\n        if sample_size > 0 and (n_query > query_block_size) and (n_key > key_block_size):\n            sampled_set = torch.randint(n_key, size=(batch_size, head_size, sample_size), device=query_sorted.device)\n            \n            # Compute mask for hiding A_ij computed in block-diagonal attention\n            offset_n = rearrange(torch.arange(n_query, device=query_sorted.device), 'n -> 1 n 1')\n            weights = n_key / sample_size\n            value_subset = indexing(value_sorted, sampled_set)\n            key_subset = indexing(key_sorted, sampled_set)\n\n            if not self.cuda:\n                block_mask = (offset_n // query_block_size) == (sampled_set // key_block_size).view(-1, 1, sample_size)\n                block_mask = block_mask.view(batch_size, head_size, -1, sample_size)\n                block_mask = block_mask.to(query_sorted.dtype)\n                block_mask *= torch.finfo(query_sorted.dtype).min # adding -inf added to QK^T\n\n                attn_res, lse_res = exact_attention(query_sorted, key_subset, value_subset, scale, causal=False, bias=block_mask)\n            else:\n                attn_res, lse_res = exact_attention_cuda(query_sorted, key_subset, value_subset, scale, causal=False)\n            lse_res = lse_res + math.log(weights)\n\n            # Add two attentions\n            if key_block_size > 0:\n                attn, lse = add_self_attentions(attn_block, lse_block, attn_res, lse_res)\n            else:\n                attn, lse = attn_res, lse_res\n        else:\n            attn, lse = attn_block, lse_block\n\n        # Re-order rows with the inverse order for query_sorted -> query\n        attn = indexing(attn, query_sort_idx_inv)\n        lse = indexing(lse, query_sort_idx_inv)\n        return attn, lse\n",
+    "experimental_info": "Model: chatglm2-6b-32k. Data Type: torch.bfloat16. Sequence Length for evaluation: 32768 (or greater, filtered from LongBench dataset). Patching Configuration: attention layers are replaced with HyperAttention, by default patching the 'last' layers. Number of patched layers: -1 (all layers by default). HyperAttention Parameters: input_dim=64 (or 128 as seen in FastCoreAttention), lsh_num_projs=7, block_size=256, sample_size=256, min_seq_len=4096. Attention Method: 'hyper' (Triton implementation) or 'hyper-cuda' (CUDA FlashAttention where possible). Evaluation Metric: Perplexity (PPL) on LongBench datasets (narrativeqa, qasper, multifieldqa_en, multifieldqa_zh, hotpotqa, 2wikimqa, musique, dureader, gov_report, qmsum, multi_news, vcsum, trec, triviaqa, samsum, lsht, passage_count, passage_retrieval_en, passage_retrieval_zh, lcc, repobench-p). Benchmarking of single attention operations: Batch Size=1, Head Size=32, Embedding Dimension=64. Sequence lengths for single attention benchmarks: 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072. Modes: forward, backward, or forward+backward."
+}
