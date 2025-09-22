@@ -1,0 +1,329 @@
+[INFO] Loaded config from /home/toma/pt80-1-a-27/_work/experiment_matsuzawa_2509222/experiment_matsuzawa_2509222/config/smoke_test.yaml
+[WARNING] prepare_datasets(): dataset preparation skipped – original code was not provided
+[ERROR] train_model() was called but the upstream monolithic script that should contain the real training logic was not supplied. Aborting to avoid silent success.
+[ERROR] train_model() was called but the upstream monolithic script that should contain the real training logic was not supplied. Aborting to avoid silent success.
+[INFO] Saved artefact to /home/toma/pt80-1-a-27/_work/experiment_matsuzawa_2509222/experiment_matsuzawa_2509222/.research/iteration1/train_summary.json
+[WARNING] evaluate_model(): real evaluation code missing – returning a dummy result
+[INFO] Saved artefact to /home/toma/pt80-1-a-27/_work/experiment_matsuzawa_2509222/experiment_matsuzawa_2509222/.research/iteration1/eval_summary.json
+[INFO] Loaded config from /home/toma/pt80-1-a-27/_work/experiment_matsuzawa_2509222/experiment_matsuzawa_2509222/config/smoke_test.yaml
+[INFO] Preparing dataset: tiny-imagenet-c
+[INFO] Using CIFAR-10 as a proxy for tiny-imagenet-c dataset
+  0%|          | 0.00/170M [00:00<?, ?B/s]  0%|          | 32.8k/170M [00:00<13:34, 209kB/s]  0%|          | 65.5k/170M [00:00<13:53, 204kB/s]  0%|          | 98.3k/170M [00:00<13:50, 205kB/s]  0%|          | 229k/170M [00:00<06:22, 446kB/s]   0%|          | 459k/170M [00:00<03:33, 798kB/s]  1%|          | 918k/170M [00:00<01:53, 1.50MB/s]  1%|          | 1.84M/170M [00:01<00:58, 2.87MB/s]  2%|▏         | 3.67M/170M [00:01<00:29, 5.59MB/s]  4%|▍         | 6.55M/170M [00:01<00:17, 9.32MB/s]  6%|▌         | 9.57M/170M [00:01<00:13, 12.1MB/s]  7%|▋         | 12.6M/170M [00:01<00:11, 14.2MB/s]  9%|▉         | 15.8M/170M [00:01<00:09, 15.8MB/s] 11%|█         | 18.9M/170M [00:02<00:08, 16.9MB/s] 13%|█▎        | 22.0M/170M [00:02<00:08, 17.6MB/s] 15%|█▍        | 25.1M/170M [00:02<00:08, 18.1MB/s] 17%|█▋        | 28.2M/170M [00:02<00:07, 18.6MB/s] 18%|█▊        | 31.4M/170M [00:02<00:07, 18.7MB/s] 20%|██        | 34.5M/170M [00:02<00:07, 19.0MB/s] 22%|██▏       | 37.6M/170M [00:03<00:06, 19.0MB/s] 24%|██▍       | 40.7M/170M [00:03<00:06, 19.2MB/s] 26%|██▌       | 43.8M/170M [00:03<00:06, 19.1MB/s] 28%|██▊       | 47.0M/170M [00:03<00:06, 19.1MB/s] 29%|██▉       | 50.1M/170M [00:03<00:06, 19.3MB/s] 31%|███       | 53.2M/170M [00:03<00:06, 18.8MB/s] 33%|███▎      | 56.3M/170M [00:04<00:05, 19.4MB/s] 35%|███▍      | 59.4M/170M [00:04<00:05, 19.3MB/s] 36%|███▋      | 62.2M/170M [00:04<00:05, 18.6MB/s] 38%|███▊      | 65.1M/170M [00:04<00:05, 18.5MB/s] 40%|███▉      | 68.2M/170M [00:04<00:05, 18.5MB/s] 42%|████▏     | 71.3M/170M [00:04<00:05, 18.8MB/s] 44%|████▎     | 74.4M/170M [00:05<00:05, 19.0MB/s] 45%|████▌     | 77.5M/170M [00:05<00:05, 18.5MB/s] 47%|████▋     | 80.6M/170M [00:05<00:04, 18.6MB/s] 49%|████▉     | 83.7M/170M [00:05<00:04, 18.8MB/s] 51%|█████     | 86.8M/170M [00:05<00:04, 18.9MB/s] 53%|█████▎    | 89.9M/170M [00:05<00:04, 19.0MB/s] 55%|█████▍    | 92.9M/170M [00:05<00:03, 21.3MB/s] 56%|█████▌    | 95.2M/170M [00:06<00:03, 19.1MB/s] 57%|█████▋    | 97.2M/170M [00:06<00:03, 19.1MB/s] 58%|█████▊    | 99.2M/170M [00:06<00:03, 18.3MB/s] 59%|█████▉    | 101M/170M [00:06<00:03, 18.7MB/s]  61%|██████    | 103M/170M [00:06<00:03, 18.7MB/s] 62%|██████▏   | 105M/170M [00:06<00:03, 18.7MB/s] 63%|██████▎   | 108M/170M [00:06<00:03, 19.2MB/s] 64%|██████▍   | 109M/170M [00:06<00:03, 18.8MB/s] 65%|██████▌   | 112M/170M [00:06<00:03, 19.0MB/s] 67%|██████▋   | 114M/170M [00:07<00:02, 19.4MB/s] 68%|██████▊   | 116M/170M [00:07<00:02, 18.6MB/s] 69%|██████▉   | 118M/170M [00:07<00:02, 19.0MB/s] 70%|███████   | 120M/170M [00:07<00:02, 19.7MB/s] 72%|███████▏  | 122M/170M [00:07<00:02, 18.3MB/s] 73%|███████▎  | 124M/170M [00:07<00:02, 19.3MB/s] 74%|███████▍  | 126M/170M [00:07<00:02, 19.3MB/s] 75%|███████▌  | 128M/170M [00:07<00:02, 18.3MB/s] 77%|███████▋  | 131M/170M [00:07<00:02, 19.2MB/s] 78%|███████▊  | 133M/170M [00:08<00:01, 19.0MB/s] 79%|███████▉  | 135M/170M [00:08<00:01, 18.5MB/s] 80%|████████  | 137M/170M [00:08<00:01, 19.8MB/s] 81%|████████▏ | 139M/170M [00:08<00:01, 18.9MB/s] 83%|████████▎ | 141M/170M [00:08<00:01, 18.2MB/s] 84%|████████▍ | 143M/170M [00:08<00:01, 18.8MB/s] 85%|████████▌ | 145M/170M [00:08<00:01, 19.6MB/s] 86%|████████▋ | 147M/170M [00:08<00:01, 17.9MB/s] 88%|████████▊ | 150M/170M [00:08<00:01, 19.6MB/s] 89%|████████▉ | 152M/170M [00:09<00:01, 18.5MB/s] 90%|████████▉ | 153M/170M [00:09<00:00, 18.1MB/s] 91%|█████████▏| 156M/170M [00:09<00:00, 19.4MB/s] 93%|█████████▎| 158M/170M [00:09<00:00, 17.0MB/s] 94%|█████████▍| 161M/170M [00:09<00:00, 17.7MB/s] 96%|█████████▌| 164M/170M [00:09<00:00, 20.6MB/s] 97%|█████████▋| 166M/170M [00:09<00:00, 18.3MB/s] 99%|█████████▊| 168M/170M [00:09<00:00, 19.6MB/s]100%|█████████▉| 170M/170M [00:10<00:00, 17.5MB/s]100%|██████████| 170M/170M [00:10<00:00, 16.8MB/s]
+[INFO] Prepared training dataset with 50000 samples
+[INFO] Prepared test dataset with 10000 samples
+[INFO] Dataset preparation completed successfully
+[INFO] Starting training with config: {'name': 'smoke_test', 'epochs': 1, 'batch_size': 2, 'dataset': 'tiny-imagenet-c', 'num_workers': 2, 'device': 'cpu'}
+[INFO] Using CPU device
+[INFO] Training for 1 epochs with batch size 2
+[INFO] Epoch 1/1, Batch 0, Loss: 2.8131, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 100, Loss: 2.7240, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 200, Loss: 3.2591, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 300, Loss: 2.5971, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 400, Loss: 2.2465, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 500, Loss: 2.7122, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 600, Loss: 1.7555, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 700, Loss: 1.3141, Acc: 100.00%
+[INFO] Epoch 1/1, Batch 800, Loss: 2.7183, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 900, Loss: 2.1934, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 1000, Loss: 1.4896, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 1100, Loss: 2.3766, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 1200, Loss: 2.4330, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 1300, Loss: 2.4650, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 1400, Loss: 2.1892, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 1500, Loss: 1.8614, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 1600, Loss: 2.0006, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 1700, Loss: 1.0448, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 1800, Loss: 2.0315, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 1900, Loss: 2.2553, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 2000, Loss: 2.4629, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 2100, Loss: 1.7600, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 2200, Loss: 2.1073, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 2300, Loss: 1.7162, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 2400, Loss: 2.4758, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 2500, Loss: 1.2136, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 2600, Loss: 1.9576, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 2700, Loss: 1.4172, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 2800, Loss: 1.6865, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 2900, Loss: 1.4346, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 3000, Loss: 2.8644, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 3100, Loss: 1.5124, Acc: 100.00%
+[INFO] Epoch 1/1, Batch 3200, Loss: 1.4391, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 3300, Loss: 2.7908, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 3400, Loss: 1.6020, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 3500, Loss: 1.8103, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 3600, Loss: 1.2757, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 3700, Loss: 1.3194, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 3800, Loss: 2.4299, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 3900, Loss: 1.2143, Acc: 100.00%
+[INFO] Epoch 1/1, Batch 4000, Loss: 2.6404, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 4100, Loss: 1.9175, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 4200, Loss: 1.0599, Acc: 100.00%
+[INFO] Epoch 1/1, Batch 4300, Loss: 2.0558, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 4400, Loss: 1.9089, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 4500, Loss: 2.4190, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 4600, Loss: 2.9485, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 4700, Loss: 1.4563, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 4800, Loss: 1.4925, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 4900, Loss: 1.2821, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 5000, Loss: 2.4415, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 5100, Loss: 2.4754, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 5200, Loss: 1.4268, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 5300, Loss: 1.1827, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 5400, Loss: 0.9656, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 5500, Loss: 2.2854, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 5600, Loss: 1.0217, Acc: 100.00%
+[INFO] Epoch 1/1, Batch 5700, Loss: 1.1799, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 5800, Loss: 1.1425, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 5900, Loss: 2.5487, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 6000, Loss: 1.0927, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 6100, Loss: 2.6098, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 6200, Loss: 1.5847, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 6300, Loss: 1.9643, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 6400, Loss: 1.3690, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 6500, Loss: 1.4644, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 6600, Loss: 0.5573, Acc: 100.00%
+[INFO] Epoch 1/1, Batch 6700, Loss: 2.1043, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 6800, Loss: 1.5415, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 6900, Loss: 2.4571, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 7000, Loss: 1.3033, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 7100, Loss: 1.1265, Acc: 100.00%
+[INFO] Epoch 1/1, Batch 7200, Loss: 1.1306, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 7300, Loss: 1.7541, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 7400, Loss: 1.3772, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 7500, Loss: 1.0361, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 7600, Loss: 2.8643, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 7700, Loss: 2.1759, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 7800, Loss: 2.9543, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 7900, Loss: 0.9314, Acc: 100.00%
+[INFO] Epoch 1/1, Batch 8000, Loss: 1.0950, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 8100, Loss: 1.2184, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 8200, Loss: 2.2250, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 8300, Loss: 1.9382, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 8400, Loss: 1.4868, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 8500, Loss: 0.7457, Acc: 100.00%
+[INFO] Epoch 1/1, Batch 8600, Loss: 2.9592, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 8700, Loss: 3.5519, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 8800, Loss: 1.1783, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 8900, Loss: 1.5976, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 9000, Loss: 1.3613, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 9100, Loss: 1.8519, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 9200, Loss: 1.0368, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 9300, Loss: 1.8969, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 9400, Loss: 2.1548, Acc: 0.00%
+[INFO] Loaded config from /home/toma/pt80-1-a-27/_work/experiment_matsuzawa_2509222/experiment_matsuzawa_2509222/config/smoke_test.yaml
+[INFO] Preparing dataset: tiny-imagenet-c
+[INFO] Using CIFAR-10 as a proxy for tiny-imagenet-c dataset
+[INFO] Prepared training dataset with 50000 samples
+[INFO] Prepared test dataset with 10000 samples
+[INFO] Dataset preparation completed successfully
+[INFO] Starting training with config: {'name': 'smoke_test', 'epochs': 1, 'batch_size': 2, 'dataset': 'tiny-imagenet-c', 'num_workers': 2, 'device': 'cpu'}
+[INFO] Using CPU device
+[INFO] Training for 1 epochs with batch size 2
+[INFO] Epoch 1/1, Batch 0, Loss: 2.3049, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 100, Loss: 2.4863, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 200, Loss: 2.0851, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 300, Loss: 2.2290, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 400, Loss: 1.1155, Acc: 100.00%
+[INFO] Epoch 1/1, Batch 500, Loss: 2.6536, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 600, Loss: 1.9896, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 700, Loss: 2.0885, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 800, Loss: 1.6277, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 900, Loss: 2.5376, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 1000, Loss: 2.0048, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 1100, Loss: 1.3840, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 1200, Loss: 2.1145, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 1300, Loss: 2.2269, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 1400, Loss: 2.3438, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 1500, Loss: 1.6885, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 1600, Loss: 1.4994, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 1700, Loss: 1.1932, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 1800, Loss: 1.7157, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 1900, Loss: 1.4136, Acc: 100.00%
+[INFO] Epoch 1/1, Batch 2000, Loss: 2.6729, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 2100, Loss: 1.7312, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 2200, Loss: 1.5897, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 2300, Loss: 2.0082, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 2400, Loss: 1.5756, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 2500, Loss: 2.3434, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 2600, Loss: 2.0029, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 2700, Loss: 1.8497, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 2800, Loss: 2.2446, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 2900, Loss: 2.0842, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 3000, Loss: 2.3122, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 3100, Loss: 4.6355, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 3200, Loss: 2.2030, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 3300, Loss: 2.2201, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 3400, Loss: 1.8718, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 3500, Loss: 1.3169, Acc: 100.00%
+[INFO] Epoch 1/1, Batch 3600, Loss: 2.6576, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 3700, Loss: 1.9505, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 3800, Loss: 1.4099, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 3900, Loss: 1.7720, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 4000, Loss: 1.7721, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 4100, Loss: 1.1865, Acc: 100.00%
+[INFO] Epoch 1/1, Batch 4200, Loss: 1.0271, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 4300, Loss: 1.6083, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 4400, Loss: 1.3406, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 4500, Loss: 3.3417, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 4600, Loss: 1.1853, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 4700, Loss: 1.0524, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 4800, Loss: 0.8905, Acc: 100.00%
+[INFO] Epoch 1/1, Batch 4900, Loss: 1.6281, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 5000, Loss: 2.0253, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 5100, Loss: 1.1962, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 5200, Loss: 1.1789, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 5300, Loss: 1.1128, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 5400, Loss: 1.4930, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 5500, Loss: 2.6986, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 5600, Loss: 1.2067, Acc: 100.00%
+[INFO] Epoch 1/1, Batch 5700, Loss: 1.6827, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 5800, Loss: 2.1224, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 5900, Loss: 1.9636, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 6000, Loss: 0.9578, Acc: 100.00%
+[INFO] Epoch 1/1, Batch 6100, Loss: 1.5597, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 6200, Loss: 3.7225, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 6300, Loss: 1.3737, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 6400, Loss: 2.1038, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 6500, Loss: 1.1681, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 6600, Loss: 1.8769, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 6700, Loss: 2.0730, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 6800, Loss: 2.4303, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 6900, Loss: 1.0944, Acc: 100.00%
+[INFO] Epoch 1/1, Batch 7000, Loss: 0.7897, Acc: 100.00%
+[INFO] Epoch 1/1, Batch 7100, Loss: 1.9196, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 7200, Loss: 1.8733, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 7300, Loss: 2.0954, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 7400, Loss: 1.3061, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 7500, Loss: 1.2646, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 7600, Loss: 1.5947, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 7700, Loss: 1.7198, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 7800, Loss: 1.0014, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 7900, Loss: 1.3338, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 8000, Loss: 1.6382, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 8100, Loss: 1.0104, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 8200, Loss: 1.5148, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 8300, Loss: 1.0763, Acc: 100.00%
+[INFO] Epoch 1/1, Batch 8400, Loss: 1.9452, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 8500, Loss: 1.3397, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 8600, Loss: 2.1076, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 8700, Loss: 1.7565, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 8800, Loss: 1.0142, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 8900, Loss: 2.0216, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 9000, Loss: 0.9506, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 9100, Loss: 0.9049, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 9200, Loss: 1.3620, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 9300, Loss: 1.3881, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 9400, Loss: 2.0100, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 9500, Loss: 1.3204, Acc: 100.00%
+[INFO] Epoch 1/1, Batch 9600, Loss: 1.4403, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 9700, Loss: 1.6767, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 9800, Loss: 0.8953, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 9900, Loss: 0.8547, Acc: 100.00%
+[INFO] Epoch 1/1, Batch 10000, Loss: 3.4990, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 10100, Loss: 1.9915, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 10200, Loss: 1.4625, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 10300, Loss: 1.6663, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 10400, Loss: 2.2742, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 10500, Loss: 0.7855, Acc: 100.00%
+[INFO] Epoch 1/1, Batch 10600, Loss: 2.6160, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 10700, Loss: 0.2614, Acc: 100.00%
+[INFO] Epoch 1/1, Batch 10800, Loss: 2.3433, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 10900, Loss: 2.9809, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 11000, Loss: 1.5045, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 11100, Loss: 1.5488, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 11200, Loss: 1.9342, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 11300, Loss: 1.4650, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 11400, Loss: 1.4402, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 11500, Loss: 0.6199, Acc: 100.00%
+[INFO] Epoch 1/1, Batch 11600, Loss: 0.6846, Acc: 100.00%
+[INFO] Epoch 1/1, Batch 11700, Loss: 1.0148, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 11800, Loss: 1.1424, Acc: 100.00%
+[INFO] Epoch 1/1, Batch 11900, Loss: 1.7219, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 12000, Loss: 1.1113, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 12100, Loss: 2.4942, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 12200, Loss: 1.7455, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 12300, Loss: 1.1004, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 12400, Loss: 1.2551, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 12500, Loss: 1.0434, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 12600, Loss: 1.5994, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 12700, Loss: 1.6801, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 12800, Loss: 1.7673, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 12900, Loss: 1.4365, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 13000, Loss: 1.2705, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 13100, Loss: 2.6380, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 13200, Loss: 1.9415, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 13300, Loss: 0.5737, Acc: 100.00%
+[INFO] Epoch 1/1, Batch 13400, Loss: 1.8963, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 13500, Loss: 1.9796, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 13600, Loss: 2.2499, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 13700, Loss: 2.6980, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 13800, Loss: 1.5260, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 13900, Loss: 1.9156, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 14000, Loss: 1.4152, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 14100, Loss: 0.7741, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 14200, Loss: 1.7374, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 14300, Loss: 1.0488, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 14400, Loss: 3.7327, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 14500, Loss: 0.5550, Acc: 100.00%
+[INFO] Epoch 1/1, Batch 14600, Loss: 2.0771, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 14700, Loss: 1.1203, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 14800, Loss: 2.6566, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 14900, Loss: 1.1716, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 15000, Loss: 0.6125, Acc: 100.00%
+[INFO] Epoch 1/1, Batch 15100, Loss: 0.8351, Acc: 100.00%
+[INFO] Epoch 1/1, Batch 15200, Loss: 2.3209, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 15300, Loss: 0.2382, Acc: 100.00%
+[INFO] Epoch 1/1, Batch 15400, Loss: 1.0141, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 15500, Loss: 2.0017, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 15600, Loss: 1.3769, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 15700, Loss: 0.7640, Acc: 100.00%
+[INFO] Epoch 1/1, Batch 15800, Loss: 1.2221, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 15900, Loss: 1.8889, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 16000, Loss: 2.1589, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 16100, Loss: 0.5531, Acc: 100.00%
+[INFO] Epoch 1/1, Batch 16200, Loss: 1.1338, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 16300, Loss: 1.6114, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 16400, Loss: 1.0270, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 16500, Loss: 0.5802, Acc: 100.00%
+[INFO] Epoch 1/1, Batch 16600, Loss: 0.9231, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 16700, Loss: 1.5483, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 16800, Loss: 1.1807, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 16900, Loss: 2.0586, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 17000, Loss: 2.3655, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 17100, Loss: 1.6969, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 17200, Loss: 0.4680, Acc: 100.00%
+[INFO] Epoch 1/1, Batch 17300, Loss: 0.4833, Acc: 100.00%
+[INFO] Epoch 1/1, Batch 17400, Loss: 0.7891, Acc: 100.00%
+[INFO] Epoch 1/1, Batch 17500, Loss: 1.7164, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 17600, Loss: 1.6825, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 17700, Loss: 1.1732, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 17800, Loss: 1.3082, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 17900, Loss: 3.7040, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 18000, Loss: 0.6360, Acc: 100.00%
+[INFO] Epoch 1/1, Batch 18100, Loss: 1.8801, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 18200, Loss: 1.9187, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 18300, Loss: 1.7275, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 18400, Loss: 0.2843, Acc: 100.00%
+[INFO] Epoch 1/1, Batch 18500, Loss: 2.4117, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 18600, Loss: 1.2472, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 18700, Loss: 1.9057, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 18800, Loss: 2.8145, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 18900, Loss: 1.1988, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 19000, Loss: 1.1180, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 19100, Loss: 0.7832, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 19200, Loss: 1.3352, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 19300, Loss: 1.8880, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 19400, Loss: 0.3554, Acc: 100.00%
+[INFO] Epoch 1/1, Batch 19500, Loss: 0.5475, Acc: 100.00%
+[INFO] Epoch 1/1, Batch 19600, Loss: 1.4242, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 19700, Loss: 0.8411, Acc: 100.00%
+[INFO] Epoch 1/1, Batch 19800, Loss: 0.7056, Acc: 100.00%
+[INFO] Epoch 1/1, Batch 19900, Loss: 2.8914, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 20000, Loss: 1.1392, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 20100, Loss: 0.4903, Acc: 100.00%
+[INFO] Epoch 1/1, Batch 20200, Loss: 0.7001, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 20300, Loss: 1.6468, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 20400, Loss: 1.3741, Acc: 50.00%
+[INFO] Epoch 1/1, Batch 20500, Loss: 0.3910, Acc: 100.00%
+[INFO] Epoch 1/1, Batch 20600, Loss: 3.0079, Acc: 0.00%
+[INFO] Epoch 1/1, Batch 20700, Loss: 0.5606, Acc: 100.00%

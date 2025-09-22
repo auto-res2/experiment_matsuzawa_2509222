@@ -1,0 +1,4 @@
+{
+  "status": "failed",
+  "error": "train_model() was called but the upstream monolithic script that should contain the real training logic was not supplied. Aborting to avoid silent success."
+}

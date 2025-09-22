@@ -1,0 +1,16 @@
+=== [PHASE 1/2] Smoke test start Mon Sep 22 05:59:43 AM UTC 2025 ===
+{
+  "status": "failed",
+  "error": "train_model() was called but the upstream monolithic script that should contain the real training logic was not supplied. Aborting to avoid silent success."
+}
+{
+  "status": "skipped",
+  "reason": "evaluation logic missing"
+}
+{
+  "status": "skipped",
+  "reason": "evaluation logic missing"
+}
+=== [PHASE 1/2] Smoke test PASSED Mon Sep 22 05:59:44 AM UTC 2025 ===
+=== [PHASE 1/2] Smoke test start Mon Sep 22 06:02:26 AM UTC 2025 ===
+=== [PHASE 1/2] Smoke test start Mon Sep 22 06:07:35 AM UTC 2025 ===
