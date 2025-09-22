@@ -482,6 +482,68 @@
       }
     }
   ],
+  "reference_research_study_list": [
+    {
+      "title": "Combating adversaries with anti-adversaries"
+    },
+    {
+      "title": "Pitfalls of in-domain uncertainty estimation and ensembling in deep learning"
+    },
+    {
+      "title": "Parameter-free online test-time adaptation"
+    },
+    {
+      "title": "Online continual learning with natural distribution shifts: An empirical study with visual data"
+    },
+    {
+      "title": "Contrastive test-time adaptation"
+    },
+    {
+      "title": "Evaluating the adversarial robustness of adaptive test-time defenses"
+    },
+    {
+      "title": "Imagenet: A large-scale hierarchical image database"
+    },
+    {
+      "title": "Back to the source: Diffusion-driven test-time adaptation"
+    },
+    {
+      "title": "Unsupervised representation learning by predicting image rotations"
+    },
+    {
+      "title": "Note: Robust continual test-time adaptation against temporal correlation"
+    },
+    {
+      "title": "Explaining and harnessing adversarial examples"
+    },
+    {
+      "title": "Deep residual learning for image recognition"
+    },
+    {
+      "title": "Benchmarking neural network robustness to common corruptions and perturbations"
+    },
+    {
+      "title": "The many faces of robustness: A critical analysis of out-of-distribution generalization"
+    },
+    {
+      "title": "Denoising diffusion probabilistic models"
+    },
+    {
+      "title": "Test-time classifier adjustment module for model-agnostic domain generalization"
+    },
+    {
+      "title": "3d common corruptions and data augmentation"
+    },
+    {
+      "title": "Overcoming catastrophic forgetting in neural networks"
+    },
+    {
+      "title": "Robustifying vision transformer without retraining from scratch by test-time class-conditional feature alignment"
+    },
+    {
+      "title": "An image is worth 16x16 words: Transformers for image recognition at scale"
+    }
+  ],
   "new_method": {
     "method": "{\n    \"Open Problems\": \"1. One–step TTA with pre–computed curvature still fails when the new domain changes the dominant curvature directions themselves (e.g. viewpoint changes in 3DCC that create new cross-channel correlations). \\n2. The optimal amount of second-order information varies across layers and even across time within the same target stream; using a fixed low rank r wastes memory on some layers and starves others. \\n3. Existing fast methods are vision–specific – it is unclear how to obtain curvature cues for depthwise-conv, LN and MLP layers that appear in modern vision-language and audio encoders while keeping <2× parameter memory. \\n4. Current safety heuristics rely only on entropy; they cannot detect divergence caused by curvature drift, leading to silent accuracy collapse on rare edge cases. \",\n    \"Methods\": \"We introduce APTA – Adaptive Pre-conditioned Test-time Adaptation.\\nA1) Streaming Adaptive Rank KFAC (SA-KFAC)\\n   • For every adaptable layer we initialise r=4 Kronecker factors offline (like PROTA).\\n   • During the first T=200 test samples we run a one-pass Oja update V←V+η (gV⊤−V Λ) to refine the eigenvectors towards the target distribution and to estimate the spectrum tail energy E_tail.  If E_tail>ϵ we automatically grow the rank by power-iteration on the residual.  Rank is capped so that Σ rC≤1.8×|θ|.\\nA2) Hybrid Curvature for depthwise & MLP blocks\\n   • When kernels are depthwise or linear, we switch to a fast circulant Fisher approximation whose inverse has closed-form FFT solution; this costs O(C log C) and no extra storage.\\nA3) Curvature-aware trust region\\n   • The single update becomes θ←θ−α P_t g with α chosen per-layer by solving the quadratic model q(α)=E[g⊤P_t g]+α² E[g⊤ĤP_t g]≤Δ², giving an analytic step bound without grid search.\\nA4) Dual safety gate\\n   • We monitor both prediction entropy and the Mahalanobis distance d²=g⊤Ĥ⁻¹g.  An update is skipped if d²>κ or entropy<τ.  This detects curvature drift earlier than entropy alone.\\nA5) Confidence-corrected bias head\\n   • We update the classifier bias with a Kalman-filter whose variance term is driven by the running disagreement between soft pseudo-labels and EMA logits, improving label-shift handling with <0.1 MB.\\nAll operations reuse the backward pass; extra compute is one GEMV per added eigenvector (≤4).  Overall C(g)=1.15 on ResNet-50.\",\n    \"Experimental Setup\": \"Datasets: ImageNet-C, ImageNet-3DCC (video stream), ImageNet-A, Tiny-ImageNet-C, CIFAR100-C, ESC-50-Noise (audio) to show modality generality.\\nModels: ResNet-50-BN, ConvNeXt-Tiny (depthwise conv), ViT-B/16-LN, Audio Spectrogram Transformer.\\nProtocol: Realistic-TTA stream speed r= base forward time; batch=32 (CNN), 16 (ViT), 8 (Audio).\\nBaselines: Source, BN, Tent-1, Tent-5, OSTA, PROTA (fixed rank), POEM, CoTTA.\\nMetrics: top-1 error, C(g), memory, AU-Compute, % skipped updates, energy (nVidia NVML).\\nAblations: (i) fixed vs adaptive rank, (ii) no Oja refinement, (iii) no dual-gate, (iv) circulant off, (v) analytic vs scalar α.\\nHardware: RTX-3090; edge test on Jetson Orin for ResNet-18.\",\n    \"Experimental Code\": \"# pseudo-code for streaming Oja update\\ndef oja_update(V, lamb, f):\\n    # f: activations (C, B)\\n    proj = V.T @ f            # r×B\\n    cov  = f @ f.T / f.shape[1]\\n    V   += eta * (cov @ V - V @ np.diag(lamb))\\n    V, R = torch.linalg.qr(V)  # re-orthonormalise\\n    lamb = torch.diag(R)**2\\n    return V, lamb\\n\\n# analytic step size per layer\\nalpha = min(1.0, delta / torch.sqrt((g * (P @ g)).sum()))\\n# dual safety gate\\nmaha = (g * (H_inv @ g)).sum()\\nif (entropy < tau) or (maha > kappa):\\n    return  # skip update\",\n    \"Expected Result\": \"• APTA lowers ImageNet-C severity-5 error from 38.9 % (PROTA) to 37.1 % and beats Tent-5 (38.4 %) while keeping C(g)=1.15.\\n• On ImageNet-3DCC video stream it reduces first-500-frames error by 4 pp over PROTA thanks to on-the-fly eigen refinement.\\n• ConvNeXt-Tiny: adaptive circulant + rank-grow cuts error by 3 pp relative to fixed-rank KFAC at the same 7 MB memory.\\n• Audio ESC-50-Noise: −5 pp vs Source, demonstrating modality transfer; OSTA fails due to missing curvature in MLP blocks.\\n• Dual safety gate eliminates the rare catastrophic failures of PROTA: worst-case error on ImageNet-V2 stays within +0.2 pp of Source.\",\n    \"Expected Conclusion\": \"Adaptive curvature, not just richer curvature, is decisive for real-time TTA.  By learning the important directions of the Hessian online via streaming Oja and by bounding updates with curvature-aware trust regions, APTA achieves state-of-the-art accuracy at C(g)≈1 while staying under a tiny memory budget.  The method generalises across convolutional, transformer and audio architectures, indicating its principled nature.  Its dual safety gate provides a formally motivated safeguard against curvature drift, making APTA suitable for safety-critical mobile applications where both latency and reliability are paramount.\"\n}",
     "experimental_design": {
