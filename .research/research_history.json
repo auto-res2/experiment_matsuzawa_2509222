@@ -6,5 +6,82 @@
     "GAT training optimization",
     "approximate attention GNN",
     "hardware-aware GAT training"
+  ],
+  "research_study_list": [
+    {
+      "title": "Bandit Samplers for Training Graph Neural Networks"
+    },
+    {
+      "title": "Adaptive Structural Fingerprints for Graph Attention Networks"
+    },
+    {
+      "title": "LazyGNN: Large-Scale Graph Neural Networks via Lazy Propagation"
+    },
+    {
+      "title": "GraphSAINT: Graph Sampling Based Inductive Learning Method"
+    },
+    {
+      "title": "GNNAutoScale: Scalable and Expressive Graph Neural Networks via Historical Embeddings"
+    },
+    {
+      "title": "Bandit Samplers for Training Graph Neural Networks"
+    },
+    {
+      "title": "Faster Neighborhood Attention: Reducing the O(n^2) Cost of Self Attention at the Threadblock Level"
+    },
+    {
+      "title": "Adaptive Structural Fingerprints for Graph Attention Networks"
+    },
+    {
+      "title": "$\\rm A^2Q$: Aggregation-Aware Quantization for Graph Neural Networks"
+    },
+    {
+      "title": "GraphQNTK: Quantum Neural Tangent Kernel for Graph Data"
+    },
+    {
+      "title": "Are GATs Out of Balance?"
+    },
+    {
+      "title": "Dynamic Rescaling for Training GNNs"
+    },
+    {
+      "title": "Bandit Samplers for Training Graph Neural Networks"
+    },
+    {
+      "title": "GATE: How to Keep Out Intrusive Neighbors"
+    },
+    {
+      "title": "Adaptive Structural Fingerprints for Graph Attention Networks"
+    },
+    {
+      "title": "Sketch-GNN: Scalable Graph Neural Networks with Sublinear Training Complexity"
+    },
+    {
+      "title": "HyperAttention: Long-context Attention in Near-Linear Time"
+    },
+    {
+      "title": "RSC: Accelerate Graph Neural Networks Training via Randomized Sparse Computations"
+    },
+    {
+      "title": "Bandit Samplers for Training Graph Neural Networks"
+    },
+    {
+      "title": "KDEformer: Accelerating Transformers via Kernel Density Estimation"
+    },
+    {
+      "title": "Degree-Quant: Quantization-Aware Training for Graph Neural Networks"
+    },
+    {
+      "title": "Bandit Samplers for Training Graph Neural Networks"
+    },
+    {
+      "title": "Dynamic Rescaling for Training GNNs"
+    },
+    {
+      "title": "$\\rm A^2Q$: Aggregation-Aware Quantization for Graph Neural Networks"
+    },
+    {
+      "title": "Are GATs Out of Balance?"
+    }
   ]
 }
