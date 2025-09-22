@@ -1,0 +1,17 @@
+
+Input:
+# Task
+You carefully read the contents of the “Paper Outline” and select one GitHub link from the “GitHub URLs List” that you think is most relevant to the contents.
+# Constraints
+- Output the index number corresponding to the selected GitHub URL.
+- Be sure to select only one GitHub URL.
+- If there is no related GitHub link, output None.
+# Paper Outline
+The methodology is primarily theoretical and empirical. The theoretical foundation involves deriving a conservation law for GATs with positive homogeneous activation functions (e.g., ReLU, LeakyReLU) based on the concept of rescale invariance. This law, specifically Theorem 2.2 and Corollary 2.3, quantifies a relationship between model parameters and their gradients under gradient flow, explaining the issue of hampered gradient propagation in unbalanced networks. Based on this insight, the paper proposes a balanced initialization scheme (Procedure 2.6) which involves: 1) Setting attention parameters to zero at initialization. 2) Scaling the randomly initialized feature weights such that the L2-norm balance (c=0 in Eq. 5) is achieved across layers, specifically by ensuring the squared L2-norm of incoming weights minus the squared L2-norm of attention weights equals the squared L2-norm of outgoing weights for each neuron. For feature weights, both Xavier initialization and a Looks-Linear-Orthogonal (LLortho) initialization are explored prior to balancing.
+
+# GitHub URLs List
+['https://github.com/Diego999/pyGAT']
+Output:
+{
+    "index": 0
+}
