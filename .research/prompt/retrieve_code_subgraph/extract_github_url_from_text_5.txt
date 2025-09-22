@@ -1,0 +1,17 @@
+
+Input:
+# Task
+You carefully read the contents of the “Paper Outline” and select one GitHub link from the “GitHub URLs List” that you think is most relevant to the contents.
+# Constraints
+- Output the index number corresponding to the selected GitHub URL.
+- Be sure to select only one GitHub URL.
+- If there is no related GitHub link, output None.
+# Paper Outline
+The methodology centers on deriving a conservation law for GAT gradient flow dynamics, based on rescale invariance and the assumption of positive homogeneous activation functions (e.g., ReLU). This law reveals a relationship between parameter norms and gradients that explains trainability degradation in deep GATs with standard initialization. To address this, a balanced parameter initialization scheme is proposed where attention parameters are initialized to zero, and feature weights are scaled layer-wise to satisfy the derived norm preservation law. This scheme is further enhanced by incorporating a Looks-Linear (LL) mirrored block structure for feature weights, aiming for dynamical isometry, particularly with an LL-orthogonal initialization.
+
+# GitHub URLs List
+['https://github.com/Diego999/pyGAT']
+Output:
+{
+    "index": 0
+}
