@@ -1,0 +1,17 @@
+
+Input:
+# Task
+You carefully read the contents of the “Paper Outline” and select one GitHub link from the “GitHub URLs List” that you think is most relevant to the contents.
+# Constraints
+- Output the index number corresponding to the selected GitHub URL.
+- Be sure to select only one GitHub URL.
+- If there is no related GitHub link, output None.
+# Paper Outline
+The core methodology is Gossip-PGA, which integrates periodic All-Reduce global averaging into Gossip SGD. After local stochastic gradient descent updates, nodes either perform a global average using efficient All-Reduce primitives (if the iteration number `k+1` is a multiple of the averaging period `H`) or a standard gossip communication step with direct neighbors. This balances communication efficiency with faster consensus. Gossip-AGA is proposed as an adaptive extension, where the global averaging period `H` is dynamically adjusted based on the training loss (e.g., `H(ℓ) = d1/[Ef(¯x(Tℓ−1))]^(1/4)`), enabling more frequent global synchronizations in early training stages to reduce consensus variance. Theoretical convergence rates are established under standard assumptions of L-smoothness, bounded gradient noise, and strongly connected networks.
+
+# GitHub URLs List
+['https://github.com/NVIDIA/apex']
+Output:
+{
+    "index": 0
+}
