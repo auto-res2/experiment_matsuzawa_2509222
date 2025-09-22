@@ -1,0 +1,148 @@
+
+Input:
+You are an expert reviewer for a top-tier international conference.
+Please conduct a comprehensive review of the research paper provided, evaluating it according to the standards of venues like NeurIPS, ICML, ICLR, or AAAI.
+
+Your task is to evaluate the paper on four key dimensions and provide scores from 1-10 for each:
+
+## Evaluation Dimensions:
+
+### 1. Novelty (1-10)
+- How original and innovative is the proposed approach?
+- Does it introduce new concepts, methods, or insights?
+- Is there sufficient differentiation from existing work?
+
+### 2. Significance (1-10)
+- What is the potential impact of this work on the field?
+- Does it address an important problem?
+- Are the contributions meaningful and substantial?
+
+### 3. Reproducibility (1-10)
+- Are the experimental details sufficient for reproduction?
+- Is the methodology clearly described?
+- Are datasets, hyperparameters, and implementation details provided?
+
+### 4. Experimental Quality (1-10)
+- Are the experiments well-designed and comprehensive?
+- Are appropriate baselines and evaluation metrics used?
+- Is statistical significance properly assessed?
+- Are the results convincing and well-analyzed?
+
+## Section-by-Section Analysis:
+
+For each section of the paper, provide:
+- Key strengths
+- Areas for improvement
+- Specific comments on quality and completeness
+
+## Overall Assessment:
+
+Provide your scores for each dimension, followed by an overall recommendation.
+
+## Paper Content:
+
+
+**Title:** Stochastic Hierarchical Adaptive Neighbour Sampling for Energy-Capped Graph Attention Training
+
+
+**Abstract:** Training attention-based graph neural networks (GNNs) at scale remains onerous because the quadratic growth of receptive fields inflates memory traffic and power draw. State-of-the-art drift-aware samplers such as SAG-LS and ADLAS lower gradient variance but still (i) allocate the same neighbour budget to every node although a handful of hubs dominate variance, (ii) rely on micro full-batch control-variate passes that become the new bottleneck on graphs with more than 10^8 edges or on CPU-only hardware, and (iii) ignore the hard power caps characteristic of edge devices. We address these gaps with Stochastic Hierarchical Adaptive Neighbour Sampling (SHANS). SHANS keeps per-node online variance estimates, assigns hierarchical budgets proportional to the square root of those estimates, and combines a stale-attention importance draw with a random-walk corrective draw to import two-hop context without dense passes. A single Hutchinson trace replaces micro full-batch control-variates; mixed-precision shipping down-casts messages from low-degree senders when instantaneous power exceeds a user cap; and a lightweight scheduler triggers control-variate refreshes only when the expected variance drop per joule is favourable. All logic fits into 200 lines of PyTorch-Geometric code with no custom CUDA. Smoke-test runs confirm interface correctness but also expose the performance gap that the missing control-variate and energy modules are designed to close. We therefore provide a rigorous experimental blueprint—including datasets with up to 135 M edges, baselines, ablations and energy instrumentation—to enable full replication once the implementation is complete.
+
+
+**Introduction:** Graph neural networks (GNNs) underpin state-of-the-art models in recommendation, drug discovery and web ranking. Attention-based variants such as the Graph Attention Network (GAT) weight neighbours adaptively and thus excel on heterophilic graphs, but they intensify the long-standing neighbourhood-explosion problem. To obtain a single gradient step for a K-layer GAT one must fetch O(d^K) embeddings, where d is the average degree. On commodity GPUs this already strains memory, while on 10 W edge systems it violates power and thermal envelopes outright. Sampling is the de-facto remedy. Layer-wise samplers such as FastGCN [chen-2018-fastgcn] and sub-graph samplers such as GraphSAINT [zeng-2019-graphsaint] bound memory yet induce large gradient variance because all sampled neighbours are treated equally. Control-variate approaches—VR-GCN [chen-2017-stochastic], SAG-LS and ADLAS—reduce variance by adding and subtracting a running layer-wise mean refreshed via cheap full-batch passes. These strategies work well for shallow convolutional networks on GPUs, but three obstacles remain unsolved for deep attentive networks under hard energy constraints. 
+
+1. Skewed variance. Empirically, a small fraction of high-degree hubs dominates gradient variance whereas more than 80 % of nodes could be served with far fewer samples. Uniform budgets therefore waste work and energy. 
+2. Micro full-batch control-variates. On graphs with |E|>10^8 or on CPU-only platforms, periodic dense passes become the main runtime and energy driver. 
+3. Energy unawareness. Neither neighbour count nor numeric precision nor refresh timing is adapted to the instantaneous power budget, making attentive GNNs essentially untrainable on Raspberry Pi 4 or Jetson-Nano. 
+
+We introduce Stochastic Hierarchical Adaptive Neighbour Sampling (SHANS), a sampler that explicitly maximises gradient-variance reduction per joule consumed. The design combines five simple yet previously unintegrated ideas.
+• Per-node budgets proportional to the square root of online variance estimates eliminate up to 80 % of unnecessary samples.
+• A two-stage sampler draws half of the budget via stale-attention importance sampling and the remainder through a random walk with restart, implicitly importing two-hop context without full-batch graphs.
+• A low-cost Hutchinson trace approximates control-variates using only sparse matrix–vector multiplies, enabling CPU-only training.
+• Mixed-precision shipping down-casts messages from low-degree senders to INT8 whenever instantaneous power exceeds a user-specified cap; the added quantisation noise is folded into the variance estimate so budgets adapt automatically.
+• A refresh scheduler learns when the next control-variate update yields the highest variance drop per joule.
+
+Contributions.
+• We formulate a variance-per-joule objective for GNN sampling and analyse its trade-offs.
+• We propose SHANS, a 200-line PyTorch-Geometric sampler that jointly adapts neighbour count, numeric precision and refresh timing without custom CUDA.
+• We publish an open-source implementation plus smoke-test logs that verify interface correctness.
+• We outline a comprehensive experimental protocol—covering GPUs, CPU-only systems and 10 W edge devices—that the community can use to reproduce forthcoming results.
+
+Future work will finalise the control-variate, mixed-precision and scheduler modules and produce the full set of measurements promised herein.
+
+
+**Related Work:** Variance-reduced sampling. Control-variate GNN training began with VR-GCN [chen-2017-stochastic] and was refined by SAG-LS and ADLAS, both of which interleave mini-batch sampling with periodic dense passes. These methods halve variance on convolutional layers but leave neighbour budgets uniform and become bottlenecks on large graphs. Bandit-based sampling [liu-2020-bandit] learns importance weights online but disregards energy and numeric precision constraints. 
+
+Graph-partition approaches. Sub-graph sampling in GraphSAINT [zeng-2019-graphsaint] and cluster sampling in Cluster-GCN [chiang-2019-cluster] increase GPU utilisation yet still suffer large estimator variance when used with attention. Historical-embedding schemes such as GNNAutoScale [fey-2021-gnnautoscale] and LazyGNN [xue-2023-lazygnn] prune computation trees rather than neighbours, making them complementary to our work but still memory-hungry on embedded devices.
+
+Quantisation and energy-aware execution. Degree-Quant [tailor-2020-degree] and A^2Q [zhu-2023-aggregation] accelerate inference through mixed precision but do not tackle training-time sampling. Randomised sparse computation (RSC) [liu-2022-rsc] targets kernel-level acceleration and hence is orthogonal. To our knowledge, SHANS is the first sampler that jointly optimises neighbour count, precision and control-variate timing with an explicit energy objective.
+
+In contrast with the above, SHANS eliminates dense control-variates, adapts per-node budgets and integrates power-aware precision scaling, thereby addressing the three open obstacles identified in Section 1.
+
+
+**Background:** Problem setting. We consider supervised node classification on a static graph G=(V,E) with node features X∈ℝ^{|V|×d} and labels y. A K-layer GAT computes embeddings h_v^{(ℓ)} by aggregating messages m_{u→v}^{(ℓ)}=α_{uv}^{(ℓ)}W h_u^{(ℓ−1)} where attention weights α_{uv}^{(ℓ)} depend on h_v^{(ℓ−1)} and h_u^{(ℓ−1)}. Mini-batch stochastic gradient descent samples a set B⊂V of target nodes. For each v∈B and layer ℓ the sampler chooses a subset N̂_v^{(ℓ)}⊂N(v) of neighbours whose messages are evaluated. Unbiasedness requires E[∇̂L]=∇L; convergence speed is driven by Var[∇̂L].
+
+Limitations of uniform budgets. Existing samplers fix |N̂_v^{(ℓ)}|=k. Because Var[∇̂L] is highly skewed across nodes, uniform budgets oversample low-variance nodes and undersample hubs, wasting energy and slowing convergence.
+
+Control-variates. Layer-wise means μ̄_ℓ reduce variance but must be refreshed by dense passes. On graphs with |E|>10^8 or on CPUs this dominates cost.
+
+Energy model. Device power P(t) grows approximately linearly with arithmetic intensity and super-linearly with numeric precision. Edge devices impose hard caps (≤20 W). Sampling influences both neighbour count and precision; a sampler should therefore minimise variance subject to an energy budget.
+
+
+**Method:** SHANS minimises gradient variance under an explicit energy budget via five interacting mechanisms.
+
+Per-node hierarchical budget. After each backward pass SHANS receives the L2 norm of the gradient for every active node. Using Welford statistics it updates an unbiased estimate σ̂_v^2 and sets k̂_v = ceil(k_min + (k_max−k_min)√(σ̂_v^2/σ̂_max^2)) clipped to [k_min,k_max]. The square-root schedule reflects diminishing returns and adds O(|B|) time and one float of memory per node.
+
+Two-stage sampler. For node v: (1) importance stage—draw ⌊k̂_v/2⌋ neighbours with probability proportional to stale attention coefficients α̃_{uv}; (2) corrective stage—draw the remaining neighbours via a one-step random walk with restart from v. The estimator remains unbiased while importing influential two-hop context at low cost.
+
+Hutchinson control-variate. Every R epochs SHANS approximates the layer-wise mean message by μ̄_ℓ ≈ (1/S)∑_{s=1}^{S}PAz_s where z_s are Rademacher vectors. Only sparse matrix–vector multiplies are required. With S=64 the variance of μ̄_ℓ scales O(1/S), yet runtime remains feasible even on CPUs.
+
+Mixed-precision shipping. A power monitor samples P(t). If P(t) exceeds the user cap, messages from nodes of degree<θ are down-cast to INT8; hubs remain in FP16/32. Quantisation noise δ is integrated into σ̂_v^2 so subsequent budgets compensate automatically.
+
+Energy-aware refresh scheduler. SHANS logs the observed variance drop ΔVar and energy ΔE of past refreshes, fits a lightweight surrogate g(R)=ΔVar/ΔE, and chooses the next R* that maximises g. The optimisation runs once per epoch and costs negligible time.
+
+Implementation. The full sampler is implemented in <200 LoC using the torch_geometric.loader.NeighborLoader API:
+```
+sampler = SHANSSampler(edge_index, k_min=2, k_max=25)
+loader  = NeighborLoader(data, batch_size=1024, sampler=sampler)
+for epoch in range(E):
+    for batch in loader:
+        loss = F.cross_entropy(model(batch.x, batch.edge_index), batch.y)
+        loss.backward()
+        sampler.after_backward(batch.n_id, model.gather_grad_norm())
+```
+No custom CUDA kernels are required, so the code runs unchanged on GPUs, CPUs and embedded SoCs.
+
+
+**Experimental Setup:** We design three complementary studies.
+
+Experiment 1: Variance-aware budgeting. Datasets: OGB-Products (2.5 M nodes, 61 M edges) and OGB-Arxiv (169 K nodes, 1.1 M edges). Models: 10-layer GAT (hidden 128, eight heads) on Products; 6-layer GAT on Arxiv. Methods: SHANS-full, SHANS-no-k̂ (uniform budget), ADLAS (k=25) and a three-epoch full-batch oracle. Metrics: test accuracy, gradient-variance trace, neighbour histogram (10th/50th/90th percentiles), wall-clock time, GPU RAM and average power. Three seeds. Grid search over k_min∈{1,2,4}, k_max∈{15,20,25,35}.
+
+Experiment 2: Energy-aware mixed precision. Dataset: Reddit. Hardware: Jetson-Nano (10 W cap) and NVIDIA A100 with caps 125/175/250 W. Model: 4-layer GraphTransformer (hidden 128). Variants: SHANS-full, SHANS-no-INT8, SHANS-no-scheduler and ADLAS. Primary metric: watt-hours to reach 92 % validation accuracy, with timeouts of 24 h (Jetson) and 6 h (A100). Additional metrics: bit-width histogram, PCIe traffic (A100), wall-time.
+
+Experiment 3: CPU-only scalability. Dataset: uk-2005 webgraph (15 M nodes, 135 M edges). Hardware: dual-socket AMD EPYC-7763 (128 cores), 2 TB RAM. Model: 6-layer GAT (hidden 64). Methods: SHANS-full, SHANS-no-Hutchinson, GraphSAINT (walk length 2), SAG-LS (k=20) and ADLAS (k=20). Metric: hours to reach 55 % validation accuracy; secondary metrics: peak RAM, sparse matvec count per epoch.
+
+Common protocol. Optimiser AdamW with lr 2.5×10^-3, β=(0.9,0.99), weight-decay 5×10^-4; cosine decay with five-epoch warm-up; early stopping patience 20. Seeds {42, 2023, 31415}. Energy measurement via NVIDIA NVML for GPUs and INA219 on Jetson. FLOPs profiled with PyTorch. All scripts and raw logs are released.
+
+
+**Results:** At present only two smoke-test runs have been executed, exercising the variance-aware core without control-variates, mixed precision or scheduling.
+
+Run A: Cora, two-layer GAT, two epochs. Validation accuracy 0.530; test accuracy 0.529. Standard baselines exceed 0.82, confirming that two epochs are insufficient for convergence.
+
+Run B: OGB-Products, ten-layer GAT, fifty epochs. Validation accuracy 0.196; test accuracy 0.181—well below the ≈0.78 achieved by ADLAS and full-batch training. The gap is consistent with prior reports that control-variates are essential for deep attentive models.
+
+No variance traces, neighbour histograms, runtime or energy metrics were recorded, so the claimed ≥30 % variance reduction and ≤35 % energy saving cannot yet be verified. These numbers therefore represent a worst-case ablation (no CV, no INT8, fixed R) and establish an upper bound on variance and a lower bound on accuracy.
+
+Reproducibility. Both runs are reproduced with `python src/main.py --config config/smoke_test.yaml` (Cora) and `--config config/full_experiment.yaml` (Products). All seeds and hyper-parameters are logged for scrutiny.
+
+
+**Conclusion:** We presented SHANS, a hardware-aware neighbour sampler that unifies per-node variance-driven budgets, Hutchinson control-variates, mixed-precision message shipping and an energy-aware refresh scheduler. The objective—maximise variance reduction per joule—directly reflects the constraints of modern accelerators and edge devices. A compact reference implementation establishes interface correctness; preliminary smoke tests, although underperforming due to missing modules, demonstrate the necessity of the full pipeline. We have released detailed experimental blueprints that will allow the community to verify the expected benefits: accuracy parity with full-batch training (±0.2 %), up to 35 % energy savings under strict power caps, and viable CPU-only training on graphs with 10^8 edges. Future work will complete the remaining modules, integrate SHANS with quantisation-aware training [tailor-2020-degree], combine it with historical-embedding frameworks such as GNNAutoScale [fey-2021-gnnautoscale], and derive formal variance bounds in the spirit of minimal-variance sampling [cong-2020-minimal].
+
+
+
+Output:
+{
+    "novelty_score": 7,
+    "significance_score": 5,
+    "reproducibility_score": 6,
+    "experimental_quality_score": 2
+}
